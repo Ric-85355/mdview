@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+# mdview — created 2026-08-25, version 0.1.0.
+# Purpose: read Markdown files in a two-pane curses interface.
+# Algorithm: parse source headings, map wrapped visual lines back to source lines,
+# and rebuild that mapping whenever the document pane changes width.
+
+"""A small, read-only Markdown viewer for UTF-8 Linux terminals."""
+
+from __future__ import annotations
+
+import argparse
+import curses
+import locale
+import logging
+import re
+import sys
+import textwrap
+from dataclasses import dataclass
+from pathlib import Path
+
+
+VERSION = "0.1.0"
+MIN_TERMINAL_HEIGHT = 8
+MIN_TERMINAL_WIDTH = 40
+MIN_PANEL_WIDTH = 12
+TOC_RATIO = 0.30
+LOG = logging.getLogger("mdview")
+
+HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+UNORDERED_LIST_RE = re.compile(r"^(\s*)([-+*])\s+(.*)$")
+ORDERED_LIST_RE = re.compile(r"^(\s*)(\d+[.)])\s+(.*)$")
+INDENTED_CODE_RE = re.compile(r"^(?: {4}|\t)")
+
+
+@dataclass(frozen=True)
+class Heading:
+    """A table-of-contents entry tied to a source line."""
+
+    level: int
+    title: str
+    source_line: int
+
+
+@dataclass(frozen=True)
+class VisualLine:
+    """One displayed row and the source line from which it originated."""
+
+    text: str
+    source_line: int
+    style: str = "normal"
+
+
+def parse_headings(lines: list[str]) -> list[Heading]:
+    """Return level 1–3 ATX headings, excluding fenced code blocks."""
+    headings: list[Heading] = []
+    in_fence = False
+    for source_line, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = HEADING_RE.match(line)
+        if match and len(match.group(1)) <= 3:
+            headings.append(
+                Heading(len(match.group(1)), match.group(2).strip(), source_line)
+            )
+    return headings
+
+
+def _wrapped(text: str, width: int, subsequent_indent: str = "") -> list[str]:
+    """Wrap text without breaking words unless a word alone exceeds the width."""
+    wrapper = textwrap.TextWrapper(
+        width=max(1, width),
+        subsequent_indent=subsequent_indent,
+        replace_whitespace=False,
+        drop_whitespace=True,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    return wrapper.wrap(text) or [""]
+
+
+def build_visual_lines(lines: list[str], width: int) -> list[VisualLine]:
+    """Build display rows while preserving their source-line mapping."""
+    width = max(1, width)
+    result: list[VisualLine] = []
+    in_fence = False
+
+    for source_line, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            result.append(VisualLine(line[:width], source_line, "code"))
+            in_fence = not in_fence
+            continue
+        if in_fence or INDENTED_CODE_RE.match(line):
+            result.append(VisualLine(line[:width], source_line, "code"))
+            continue
+
+        heading = HEADING_RE.match(line)
+        if heading:
+            style = "heading"
+            parts = _wrapped(line, width)
+        else:
+            unordered = UNORDERED_LIST_RE.match(line)
+            ordered = ORDERED_LIST_RE.match(line)
+            list_match = unordered or ordered
+            if list_match:
+                marker = list_match.group(2)
+                prefix = f"{list_match.group(1)}{marker} "
+                parts = _wrapped(prefix + list_match.group(3), width, " " * len(prefix))
+                style = "list"
+            else:
+                parts = _wrapped(line, width)
+                style = "normal"
+
+        result.extend(VisualLine(part, source_line, style) for part in parts)
+
+    return result or [VisualLine("", 0)]
+
+
+def visual_index_for_source(visual_lines: list[VisualLine], source_line: int) -> int:
+    """Find the first visual row belonging to a source line."""
+    for index, visual_line in enumerate(visual_lines):
+        if visual_line.source_line >= source_line:
+            return index
+    return max(0, len(visual_lines) - 1)
+
+
+def read_markdown(path: Path) -> list[str]:
+    """Read a regular UTF-8 file and return source lines without line endings."""
+    if not path.exists():
+        raise ValueError(f"файл не существует: {path}")
+    if not path.is_file():
+        raise ValueError(f"путь не является обычным файлом: {path}")
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except PermissionError as error:
+        raise ValueError(f"нет доступа к файлу: {path}") from error
+    except UnicodeDecodeError as error:
+        raise ValueError(f"файл не является корректным UTF-8: {path}") from error
+    except OSError as error:
+        raise ValueError(f"не удалось прочитать файл {path}: {error}") from error
+
+
+class Viewer:
+    """Own the viewer state, input handling, resizing, and curses drawing."""
+
+    def __init__(self, screen: curses.window, path: Path, source_lines: list[str]):
+        self.screen = screen
+        self.path = path
+        self.source_lines = source_lines
+        self.headings = parse_headings(source_lines)
+        self.toc_depth = 3
+        self.toc_selected = 0
+        self.toc_top = 0
+        self.document_top = 0
+        self.active_panel = "toc"
+        self.visual_lines: list[VisualLine] = []
+        self.last_document_width = -1
+
+    def run(self) -> None:
+        """Run the input/render loop until the user requests exit."""
+        curses.curs_set(0)
+        self.screen.keypad(True)
+        while True:
+            self._rebuild_after_resize()
+            self._draw()
+            key = self.screen.getch()
+            if key in (ord("q"), ord("Q"), 27):
+                return
+            self._handle_key(key)
+
+    def _layout(self) -> tuple[int, int, int]:
+        height, width = self.screen.getmaxyx()
+        toc_width = max(MIN_PANEL_WIDTH, int(width * TOC_RATIO))
+        toc_width = min(toc_width, max(MIN_PANEL_WIDTH, width - MIN_PANEL_WIDTH))
+        return height, width, toc_width
+
+    def _rebuild_after_resize(self) -> None:
+        height, width, toc_width = self._layout()
+        document_width = max(1, width - toc_width - 3)
+        if document_width == self.last_document_width:
+            return
+        anchor_source = 0
+        if self.visual_lines:
+            anchor_source = self.visual_lines[self.document_top].source_line
+        self.visual_lines = build_visual_lines(self.source_lines, document_width)
+        self.document_top = visual_index_for_source(self.visual_lines, anchor_source)
+        self.last_document_width = document_width
+        self._clamp_document(height)
+
+    def _visible_headings(self) -> list[Heading]:
+        return [heading for heading in self.headings if heading.level <= self.toc_depth]
+
+    def _handle_key(self, key: int) -> None:
+        height, _, _ = self._layout()
+        page = max(1, height - 4)
+        if key == ord("\t"):
+            self.active_panel = "document" if self.active_panel == "toc" else "toc"
+        elif key in (ord("1"), ord("2"), ord("3")):
+            self._change_toc_depth(int(chr(key)))
+        elif self.active_panel == "toc":
+            self._handle_toc_key(key, page)
+        else:
+            self._handle_document_key(key, page, height)
+
+    def _change_toc_depth(self, depth: int) -> None:
+        current_source = None
+        visible = self._visible_headings()
+        if visible:
+            current_source = visible[self.toc_selected].source_line
+        self.toc_depth = depth
+        updated = self._visible_headings()
+        if not updated:
+            self.toc_selected = self.toc_top = 0
+            return
+        if current_source is not None:
+            candidates = [
+                index
+                for index, heading in enumerate(updated)
+                if heading.source_line <= current_source
+            ]
+            self.toc_selected = candidates[-1] if candidates else 0
+        self._ensure_toc_visible()
+
+    def _handle_toc_key(self, key: int, page: int) -> None:
+        headings = self._visible_headings()
+        if not headings:
+            return
+        last = len(headings) - 1
+        if key == curses.KEY_UP:
+            self.toc_selected = max(0, self.toc_selected - 1)
+        elif key == curses.KEY_DOWN:
+            self.toc_selected = min(last, self.toc_selected + 1)
+        elif key == curses.KEY_PPAGE:
+            self.toc_selected = max(0, self.toc_selected - page)
+        elif key == curses.KEY_NPAGE:
+            self.toc_selected = min(last, self.toc_selected + page)
+        elif key == curses.KEY_HOME:
+            self.toc_selected = 0
+        elif key == curses.KEY_END:
+            self.toc_selected = last
+        elif key in (curses.KEY_ENTER, 10, 13):
+            self.document_top = visual_index_for_source(
+                self.visual_lines, headings[self.toc_selected].source_line
+            )
+        self._ensure_toc_visible()
+
+    def _handle_document_key(self, key: int, page: int, height: int) -> None:
+        if key == curses.KEY_UP:
+            self.document_top -= 1
+        elif key == curses.KEY_DOWN:
+            self.document_top += 1
+        elif key == curses.KEY_PPAGE:
+            self.document_top -= page
+        elif key == curses.KEY_NPAGE:
+            self.document_top += page
+        elif key == curses.KEY_HOME:
+            self.document_top = 0
+        elif key == curses.KEY_END:
+            self.document_top = len(self.visual_lines)
+        self._clamp_document(height)
+
+    def _clamp_document(self, height: int) -> None:
+        visible_height = max(1, height - 3)
+        maximum = max(0, len(self.visual_lines) - visible_height)
+        self.document_top = min(max(0, self.document_top), maximum)
+
+    def _ensure_toc_visible(self) -> None:
+        height, _, _ = self._layout()
+        visible_height = max(1, height - 3)
+        if self.toc_selected < self.toc_top:
+            self.toc_top = self.toc_selected
+        elif self.toc_selected >= self.toc_top + visible_height:
+            self.toc_top = self.toc_selected - visible_height + 1
+
+    def _draw(self) -> None:
+        self.screen.erase()
+        height, width, toc_width = self._layout()
+        if height < MIN_TERMINAL_HEIGHT or width < MIN_TERMINAL_WIDTH:
+            self._safe_add(0, 0, "Увеличьте терминал минимум до 40×8", curses.A_BOLD)
+            self.screen.refresh()
+            return
+
+        content_bottom = height - 1
+        self._draw_box(0, 0, content_bottom, toc_width, self.active_panel == "toc")
+        self._draw_box(
+            0, toc_width, content_bottom, width, self.active_panel == "document"
+        )
+        self._safe_add(
+            0,
+            2,
+            f" Оглавление (1–{self.toc_depth}) ",
+            curses.A_BOLD,
+            toc_width - 3,
+        )
+        title = f" {self.path.name} "
+        self._safe_add(
+            0,
+            toc_width + 2,
+            title,
+            curses.A_BOLD,
+            width - toc_width - 3,
+        )
+        self._draw_toc(content_bottom, toc_width)
+        self._draw_document(content_bottom, toc_width, width)
+        hint = " 1/2/3 — уровни   Tab — панель   Q — выход "
+        self._safe_add(height - 1, 0, hint.ljust(width), curses.A_REVERSE)
+        self.screen.refresh()
+
+    def _draw_box(
+        self, top: int, left: int, bottom: int, right: int, active: bool
+    ) -> None:
+        attribute = curses.A_BOLD if active else curses.A_NORMAL
+        horizontal = "═" if active else "─"
+        vertical = "║" if active else "│"
+        self._safe_add(top, left, "╔" if active else "┌", attribute)
+        self._safe_add(top, left + 1, horizontal * max(0, right - left - 2), attribute)
+        self._safe_add(top, right - 1, "╗" if active else "┐", attribute)
+        for row in range(top + 1, bottom):
+            self._safe_add(row, left, vertical, attribute)
+            self._safe_add(row, right - 1, vertical, attribute)
+        self._safe_add(bottom - 1, left, "╚" if active else "└", attribute)
+        self._safe_add(
+            bottom - 1,
+            left + 1,
+            horizontal * max(0, right - left - 2),
+            attribute,
+        )
+        self._safe_add(bottom - 1, right - 1, "╝" if active else "┘", attribute)
+
+    def _draw_toc(self, bottom: int, width: int) -> None:
+        headings = self._visible_headings()
+        visible_height = max(0, bottom - 2)
+        visible = headings[self.toc_top : self.toc_top + visible_height]
+        for row, heading in enumerate(visible, 1):
+            index = self.toc_top + row - 1
+            prefix = "  " * (heading.level - 1)
+            marker = "> " if index == self.toc_selected else "  "
+            attribute = (
+                curses.A_REVERSE if index == self.toc_selected else curses.A_NORMAL
+            )
+            self._safe_add(row, 1, marker + prefix + heading.title, attribute, width - 2)
+
+    def _draw_document(self, bottom: int, left: int, width: int) -> None:
+        visible_height = max(0, bottom - 2)
+        available_width = width - left - 2
+        for row, visual_line in enumerate(
+            self.visual_lines[self.document_top : self.document_top + visible_height], 1
+        ):
+            attribute = curses.A_NORMAL
+            if visual_line.style == "heading":
+                attribute = curses.A_BOLD | curses.A_UNDERLINE
+            elif visual_line.style == "code":
+                attribute = curses.A_DIM
+            self._safe_add(row, left + 1, visual_line.text, attribute, available_width)
+
+    def _safe_add(
+        self, row: int, column: int, text: str, attribute: int = 0, limit: int | None = None
+    ) -> None:
+        """Draw clipped text; curses may reject the terminal's lower-right cell."""
+        height, width = self.screen.getmaxyx()
+        if row < 0 or row >= height or column < 0 or column >= width:
+            return
+        maximum = max(0, width - column)
+        if limit is not None:
+            maximum = min(maximum, max(0, limit))
+        try:
+            self.screen.addnstr(row, column, text, maximum, attribute)
+        except curses.error:
+            LOG.debug("Не удалось вывести строку в позиции %s:%s", row, column)
+
+
+def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Просмотр Markdown-файла в терминале")
+    parser.add_argument("file", type=Path, help="Markdown-файл в кодировке UTF-8")
+    parser.add_argument("--version", action="version", version=f"mdview {VERSION}")
+    return parser.parse_args(arguments)
+
+
+def main(arguments: list[str] | None = None) -> int:
+    """Validate input, enter curses safely, and return a process exit status."""
+    args = parse_args(arguments)
+    try:
+        source_lines = read_markdown(args.file)
+    except ValueError as error:
+        print(f"mdview: ошибка: {error}", file=sys.stderr)
+        return 1
+
+    locale.setlocale(locale.LC_ALL, "")
+    try:
+        curses.wrapper(lambda screen: Viewer(screen, args.file, source_lines).run())
+    except KeyboardInterrupt:
+        return 130
+    except curses.error as error:
+        print(f"mdview: ошибка терминала: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
