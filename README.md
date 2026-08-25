@@ -29,6 +29,7 @@ The table of contents is built automatically from Markdown headings and supports
 * quick switching between TOC depths;
 * navigation from the TOC to document sections;
 * automatic TOC synchronization while scrolling the document;
+* case-insensitive text search with cyclic navigation and exact highlighting;
 * UTF-8 support, including Cyrillic text;
 * automatic line wrapping;
 * terminal resize handling;
@@ -76,11 +77,15 @@ mdview filename.md
 * `↑`, `↓` — move up or down;
 * `PgUp`, `PgDn` — move one page;
 * `Home`, `End` — jump to the beginning or end;
-* `Enter` — jump to the selected heading from the table of contents;
+* `Enter` — jump to the selected heading, or submit an active search;
 * `1` — show level 1 headings only;
 * `2` — show levels 1 and 2;
 * `3` — show levels 1, 2 and 3;
-* `Q`, `q`, `Esc` — exit.
+* `/` — enter a search query;
+* `.` — jump to the next match;
+* `,` — jump to the previous match;
+* `Q`, `q` — exit;
+* `Esc` — cancel search input or clear the completed search and its highlight.
 
 ### Markdown Support
 
@@ -104,7 +109,6 @@ Some Markdown syntax may remain visible.
 The following features are not currently supported:
 
 * editing;
-* search;
 * clickable links;
 * images;
 * mouse input;
@@ -153,6 +157,7 @@ python3 -m py_compile mdview test_mdview.py
 * быстрое переключение глубины оглавления;
 * переход из оглавления к разделам документа;
 * автоматическая синхронизация оглавления при прокрутке документа;
+* поиск без учёта регистра с циклической навигацией и точной подсветкой;
 * поддержка UTF-8, включая русский текст;
 * автоматический перенос строк;
 * корректная работа при изменении размера терминала;
@@ -200,11 +205,15 @@ mdview filename.md
 * `↑`, `↓` — перемещение вверх и вниз;
 * `PgUp`, `PgDn` — перемещение на страницу;
 * `Home`, `End` — начало или конец;
-* `Enter` — переход к выбранному заголовку из оглавления;
+* `Enter` — переход к выбранному заголовку или запуск введённого поиска;
 * `1` — показывать только заголовки первого уровня;
 * `2` — показывать заголовки первого и второго уровней;
 * `3` — показывать заголовки первого, второго и третьего уровней;
-* `Q`, `q`, `Esc` — выход.
+* `/` — ввести поисковый запрос;
+* `.` — перейти к следующему совпадению;
+* `,` — перейти к предыдущему совпадению;
+* `Q`, `q` — выход;
+* `Esc` — отменить ввод поиска или очистить завершённый поиск и его подсветку.
 
 ### Поддержка Markdown
 
@@ -228,7 +237,6 @@ mdview filename.md
 Пока не поддерживаются:
 
 * редактирование;
-* поиск;
 * переход по ссылкам;
 * изображения;
 * мышь;

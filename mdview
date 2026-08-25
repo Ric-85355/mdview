@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# mdview — created 2026-08-25, version 0.1.1.
+# mdview — created 2026-08-25, version 0.2.2.
 # Purpose: read Markdown files in a two-pane curses interface.
-# Algorithm: parse source headings, map wrapped visual lines back to source lines,
-# and rebuild that mapping whenever the document pane changes width.
+# Algorithm: parse and search source lines, map wrapped visual lines back to
+# source lines, and rebuild that mapping whenever the document width changes.
 
 """A small, read-only Markdown viewer for UTF-8 Linux terminals."""
 
@@ -15,11 +15,12 @@ import logging
 import re
 import sys
 import textwrap
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.1.1"
+VERSION = "0.2.2"
 MIN_TERMINAL_HEIGHT = 8
 MIN_TERMINAL_WIDTH = 40
 MIN_PANEL_WIDTH = 12
@@ -48,6 +49,16 @@ class VisualLine:
     text: str
     source_line: int
     style: str = "normal"
+    source_offsets: tuple[int | None, ...] = ()
+
+
+@dataclass(frozen=True)
+class SearchMatch:
+    """One case-insensitive match within a source line."""
+
+    source_line: int
+    source_start: int
+    source_end: int
 
 
 def parse_headings(lines: list[str]) -> list[Heading]:
@@ -81,6 +92,56 @@ def _wrapped(text: str, width: int, subsequent_indent: str = "") -> list[str]:
     return wrapper.wrap(text) or [""]
 
 
+def _expand_tabs_with_offsets(
+    text: str, source_offsets: list[int | None], tab_size: int = 8
+) -> tuple[str, list[int | None]]:
+    """Expand tabs while retaining the source offset of every displayed space."""
+    expanded: list[str] = []
+    expanded_offsets: list[int | None] = []
+    column = 0
+    for character, source_offset in zip(text, source_offsets):
+        if character == "\t":
+            spaces = tab_size - column % tab_size
+            expanded.extend(" " * spaces)
+            expanded_offsets.extend([source_offset] * spaces)
+            column += spaces
+        else:
+            expanded.append(character)
+            expanded_offsets.append(source_offset)
+            column += 1
+    return "".join(expanded), expanded_offsets
+
+
+def _mapped_wrapped(
+    text: str,
+    source_offsets: list[int | None],
+    width: int,
+    subsequent_indent: str = "",
+) -> list[tuple[str, tuple[int | None, ...]]]:
+    """Wrap text and attach source offsets to each resulting display character."""
+    expanded, expanded_offsets = _expand_tabs_with_offsets(text, source_offsets)
+    parts = _wrapped(expanded, width, subsequent_indent)
+    result: list[tuple[str, tuple[int | None, ...]]] = []
+    search_from = 0
+    for index, part in enumerate(parts):
+        indent_length = (
+            len(subsequent_indent)
+            if index > 0 and part.startswith(subsequent_indent)
+            else 0
+        )
+        content = part[indent_length:]
+        content_start = expanded.find(content, search_from) if content else search_from
+        if content_start < 0:
+            content_start = search_from
+        content_end = content_start + len(content)
+        offsets = (None,) * indent_length + tuple(
+            expanded_offsets[content_start:content_end]
+        )
+        result.append((part, offsets))
+        search_from = content_end
+    return result
+
+
 def build_visual_lines(lines: list[str], width: int) -> list[VisualLine]:
     """Build display rows while preserving their source-line mapping."""
     width = max(1, width)
@@ -90,17 +151,23 @@ def build_visual_lines(lines: list[str], width: int) -> list[VisualLine]:
     for source_line, line in enumerate(lines):
         stripped = line.lstrip()
         if stripped.startswith("```"):
-            result.append(VisualLine(line[:width], source_line, "code"))
+            text = line[:width]
+            result.append(
+                VisualLine(text, source_line, "code", tuple(range(len(text))))
+            )
             in_fence = not in_fence
             continue
         if in_fence or INDENTED_CODE_RE.match(line):
-            result.append(VisualLine(line[:width], source_line, "code"))
+            text = line[:width]
+            result.append(
+                VisualLine(text, source_line, "code", tuple(range(len(text))))
+            )
             continue
 
         heading = HEADING_RE.match(line)
         if heading:
             style = "heading"
-            parts = _wrapped(line, width)
+            parts = _mapped_wrapped(line, list(range(len(line))), width)
         else:
             unordered = UNORDERED_LIST_RE.match(line)
             ordered = ORDERED_LIST_RE.match(line)
@@ -108,13 +175,22 @@ def build_visual_lines(lines: list[str], width: int) -> list[VisualLine]:
             if list_match:
                 marker = list_match.group(2)
                 prefix = f"{list_match.group(1)}{marker} "
-                parts = _wrapped(prefix + list_match.group(3), width, " " * len(prefix))
+                transformed = prefix + list_match.group(3)
+                marker_end = list_match.start(2) + len(marker)
+                offsets: list[int | None] = list(range(marker_end))
+                offsets.append(marker_end)
+                offsets.extend(range(list_match.start(3), len(line)))
+                parts = _mapped_wrapped(
+                    transformed, offsets, width, " " * len(prefix)
+                )
                 style = "list"
             else:
-                parts = _wrapped(line, width)
+                parts = _mapped_wrapped(line, list(range(len(line))), width)
                 style = "normal"
 
-        result.extend(VisualLine(part, source_line, style) for part in parts)
+        result.extend(
+            VisualLine(part, source_line, style, offsets) for part, offsets in parts
+        )
 
     return result or [VisualLine("", 0)]
 
@@ -127,20 +203,118 @@ def visual_index_for_source(visual_lines: list[VisualLine], source_line: int) ->
     return max(0, len(visual_lines) - 1)
 
 
+def visual_index_for_match(
+    visual_lines: list[VisualLine], match: SearchMatch
+) -> int:
+    """Find the first visual row containing part of a concrete match."""
+    for index, visual_line in enumerate(visual_lines):
+        if highlight_ranges(visual_line, match):
+            return index
+    return visual_index_for_source(visual_lines, match.source_line)
+
+
+def find_text_matches(lines: list[str], query: str) -> list[SearchMatch]:
+    """Return non-overlapping, case-insensitive matches in document order."""
+    folded_query = query.casefold()
+    if not folded_query:
+        return []
+    matches: list[SearchMatch] = []
+    for source_line, line in enumerate(lines):
+        folded_parts: list[str] = []
+        folded_to_source: list[int] = []
+        for source_offset, character in enumerate(line):
+            folded_character = character.casefold()
+            folded_parts.append(folded_character)
+            folded_to_source.extend([source_offset] * len(folded_character))
+        folded_line = "".join(folded_parts)
+        offset = 0
+        while (found := folded_line.find(folded_query, offset)) >= 0:
+            source_start = folded_to_source[found]
+            source_end = folded_to_source[found + len(folded_query) - 1] + 1
+            matches.append(SearchMatch(source_line, source_start, source_end))
+            offset = found + len(folded_query)
+    return matches
+
+
+def highlight_ranges(
+    visual_line: VisualLine, match: SearchMatch
+) -> list[tuple[int, int]]:
+    """Return display-character ranges intersecting a source-level match."""
+    if visual_line.source_line != match.source_line:
+        return []
+    ranges: list[tuple[int, int]] = []
+    range_start: int | None = None
+    for index, source_offset in enumerate(visual_line.source_offsets):
+        highlighted = (
+            source_offset is not None
+            and match.source_start <= source_offset < match.source_end
+        )
+        if highlighted and range_start is None:
+            range_start = index
+        elif not highlighted and range_start is not None:
+            ranges.append((range_start, index))
+            range_start = None
+    if range_start is not None:
+        ranges.append((range_start, len(visual_line.source_offsets)))
+    return ranges
+
+
+def display_width(text: str) -> int:
+    """Approximate terminal cell width using Unicode standard properties."""
+    width = 0
+    for character in text:
+        if unicodedata.combining(character) or unicodedata.category(character) in {
+            "Cc",
+            "Cf",
+            "Me",
+            "Mn",
+        }:
+            continue
+        width += 2 if unicodedata.east_asian_width(character) in {"W", "F"} else 1
+    return width
+
+
+def clip_to_display_width(text: str, maximum_width: int) -> str:
+    """Clip text without splitting a character beyond the terminal cell limit."""
+    result: list[str] = []
+    width = 0
+    for character in text:
+        character_width = display_width(character)
+        if width + character_width > maximum_width:
+            break
+        result.append(character)
+        width += character_width
+    return "".join(result)
+
+
+def stepped_match_index(
+    current_index: int, match_count: int, direction: int
+) -> int | None:
+    """Return the next cyclic match index, or None when there are no matches."""
+    if match_count == 0:
+        return None
+    return (current_index + direction) % match_count
+
+
+def is_quit_key(key: int | str) -> bool:
+    """Return whether a key is one of the application's explicit quit keys."""
+    return key in ("q", "Q")
+
+
 def read_markdown(path: Path) -> list[str]:
     """Read a regular UTF-8 file and return source lines without line endings."""
     if not path.exists():
-        raise ValueError(f"файл не существует: {path}")
+        raise ValueError(f"file does not exist: {path}")
     if not path.is_file():
-        raise ValueError(f"путь не является обычным файлом: {path}")
+        raise ValueError(f"path is not a regular file: {path}")
     try:
         return path.read_text(encoding="utf-8").splitlines()
     except PermissionError as error:
-        raise ValueError(f"нет доступа к файлу: {path}") from error
+        raise ValueError(f"permission denied: {path}") from error
     except UnicodeDecodeError as error:
-        raise ValueError(f"файл не является корректным UTF-8: {path}") from error
+        raise ValueError(f"file is not valid UTF-8: {path}") from error
     except OSError as error:
-        raise ValueError(f"не удалось прочитать файл {path}: {error}") from error
+        raise ValueError(f"could not read file {path}: {error}") from error
 
 
 class Viewer:
@@ -158,6 +332,11 @@ class Viewer:
         self.active_panel = "toc"
         self.visual_lines: list[VisualLine] = []
         self.last_document_width = -1
+        self.search_input: str | None = None
+        self.search_query = ""
+        self.search_matches: list[SearchMatch] = []
+        self.search_match_index: int | None = None
+        self.search_message: str | None = None
 
     def run(self) -> None:
         """Run the input/render loop until the user requests exit."""
@@ -166,8 +345,11 @@ class Viewer:
         while True:
             self._rebuild_after_resize()
             self._draw()
-            key = self.screen.getch()
-            if key in (ord("q"), ord("Q"), 27):
+            key = self.screen.get_wch()
+            if self.search_input is not None:
+                self._handle_search_input(key)
+                continue
+            if is_quit_key(key):
                 return
             self._handle_key(key)
 
@@ -183,10 +365,29 @@ class Viewer:
         if document_width == self.last_document_width:
             return
         anchor_source = 0
+        match_was_visible = False
+        current_match = self._current_search_match()
         if self.visual_lines:
             anchor_source = self.visual_lines[self.document_top].source_line
+            if current_match is not None:
+                match_visual_index = visual_index_for_match(
+                    self.visual_lines, current_match
+                )
+                visible_height = max(1, height - 3)
+                match_was_visible = (
+                    self.document_top
+                    <= match_visual_index
+                    < self.document_top + visible_height
+                )
         self.visual_lines = build_visual_lines(self.source_lines, document_width)
-        self.document_top = visual_index_for_source(self.visual_lines, anchor_source)
+        if current_match is not None and match_was_visible:
+            self.document_top = visual_index_for_match(
+                self.visual_lines, current_match
+            )
+        else:
+            self.document_top = visual_index_for_source(
+                self.visual_lines, anchor_source
+            )
         self.last_document_width = document_width
         self._clamp_document(height)
         if self.active_panel == "document":
@@ -195,17 +396,82 @@ class Viewer:
     def _visible_headings(self) -> list[Heading]:
         return [heading for heading in self.headings if heading.level <= self.toc_depth]
 
-    def _handle_key(self, key: int) -> None:
+    def _handle_key(self, key: int | str) -> None:
         height, _, _ = self._layout()
         page = max(1, height - 4)
-        if key == ord("\t"):
+        self.search_message = None
+        if key == "\x1b":
+            self._reset_search()
+        elif key == "/":
+            self.search_input = ""
+        elif key == ".":
+            self._repeat_search(1)
+        elif key == ",":
+            self._repeat_search(-1)
+        elif key == "\t":
             self.active_panel = "document" if self.active_panel == "toc" else "toc"
-        elif key in (ord("1"), ord("2"), ord("3")):
-            self._change_toc_depth(int(chr(key)))
+        elif key in ("1", "2", "3"):
+            self._change_toc_depth(int(key))
         elif self.active_panel == "toc":
             self._handle_toc_key(key, page)
         else:
             self._handle_document_key(key, page, height)
+
+    def _handle_search_input(self, key: int | str) -> None:
+        """Edit, cancel, or submit the active Unicode search prompt."""
+        if key == "\x1b":
+            self.search_input = None
+            self.search_message = None
+        elif key in ("\n", "\r", curses.KEY_ENTER):
+            query = self.search_input
+            self.search_input = None
+            if query:
+                self._perform_search(query)
+        elif key in ("\b", "\x7f", curses.KEY_BACKSPACE, 8, 127):
+            self.search_input = self.search_input[:-1]
+        elif isinstance(key, str) and key.isprintable():
+            self.search_input += key
+
+    def _perform_search(self, query: str) -> None:
+        """Store a query and jump to its first source-level match."""
+        matches = find_text_matches(self.source_lines, query)
+        self.search_query = query
+        self.search_matches = matches
+        if not matches:
+            self.search_match_index = None
+            self.search_message = f"Not found: {query}"
+            return
+        self.search_match_index = 0
+        self.search_message = None
+        self._show_current_search_match()
+
+    def _reset_search(self) -> None:
+        """Clear completed search state without moving the document viewport."""
+        self.search_query = ""
+        self.search_matches = []
+        self.search_match_index = None
+        self.search_message = None
+
+    def _repeat_search(self, direction: int) -> None:
+        """Move cyclically through matches of the last successful query."""
+        if self.search_match_index is None or not self.search_matches:
+            return
+        next_index = stepped_match_index(
+            self.search_match_index, len(self.search_matches), direction
+        )
+        if next_index is not None:
+            self.search_match_index = next_index
+            self._show_current_search_match()
+
+    def _show_current_search_match(self) -> None:
+        """Make the current match visible and synchronize the table of contents."""
+        if self.search_match_index is None:
+            return
+        match = self.search_matches[self.search_match_index]
+        self.document_top = visual_index_for_match(self.visual_lines, match)
+        height, _, _ = self._layout()
+        self._clamp_document(height)
+        self._sync_toc_to_document()
 
     def _change_toc_depth(self, depth: int) -> None:
         current_source = None
@@ -226,7 +492,7 @@ class Viewer:
             self.toc_selected = candidates[-1] if candidates else 0
         self._position_toc_selection_after_depth_change()
 
-    def _handle_toc_key(self, key: int, page: int) -> None:
+    def _handle_toc_key(self, key: int | str, page: int) -> None:
         headings = self._visible_headings()
         if not headings:
             return
@@ -243,13 +509,13 @@ class Viewer:
             self.toc_selected = 0
         elif key == curses.KEY_END:
             self.toc_selected = last
-        elif key in (curses.KEY_ENTER, 10, 13):
+        elif key in (curses.KEY_ENTER, "\n", "\r"):
             self.document_top = visual_index_for_source(
                 self.visual_lines, headings[self.toc_selected].source_line
             )
         self._ensure_toc_visible()
 
-    def _handle_document_key(self, key: int, page: int, height: int) -> None:
+    def _handle_document_key(self, key: int | str, page: int, height: int) -> None:
         navigation_keys = {
             curses.KEY_UP,
             curses.KEY_DOWN,
@@ -316,7 +582,8 @@ class Viewer:
         self.screen.erase()
         height, width, toc_width = self._layout()
         if height < MIN_TERMINAL_HEIGHT or width < MIN_TERMINAL_WIDTH:
-            self._safe_add(0, 0, "Увеличьте терминал минимум до 40×8", curses.A_BOLD)
+            self._set_cursor(False)
+            self._safe_add(0, 0, "Resize terminal to at least 40×8", curses.A_BOLD)
             self.screen.refresh()
             return
 
@@ -328,11 +595,11 @@ class Viewer:
         self._safe_add(
             0,
             2,
-            f" Оглавление (1–{self.toc_depth}) ",
+            f" Contents (1–{self.toc_depth}) ",
             curses.A_BOLD,
             toc_width - 3,
         )
-        title = f" {self.path.name} "
+        title = f" Document: {self.path.name} "
         self._safe_add(
             0,
             toc_width + 2,
@@ -342,8 +609,18 @@ class Viewer:
         )
         self._draw_toc(content_bottom, toc_width)
         self._draw_document(content_bottom, toc_width, width)
-        hint = " 1/2/3 — уровни   Tab — панель   Q — выход "
-        self._safe_add(height - 1, 0, hint.ljust(width), curses.A_REVERSE)
+        if self.search_input is not None:
+            status = f" Search: {self.search_input}"
+        elif self.search_message is not None:
+            status = f" {self.search_message}"
+        else:
+            status = " 1/2/3 — TOC depth   Tab — panel   / — search   Q — quit "
+        self._safe_add(height - 1, 0, status.ljust(width), curses.A_REVERSE)
+        if self.search_input is not None:
+            cursor_column = min(width - 1, display_width(status))
+            self._set_cursor(True, height - 1, cursor_column)
+        else:
+            self._set_cursor(False)
         self.screen.refresh()
 
     def _draw_box(
@@ -392,6 +669,34 @@ class Viewer:
             elif visual_line.style == "code":
                 attribute = curses.A_DIM
             self._safe_add(row, left + 1, visual_line.text, attribute, available_width)
+            match = self._current_search_match()
+            if match is not None:
+                for start, end in highlight_ranges(visual_line, match):
+                    prefix_width = display_width(visual_line.text[:start])
+                    self._safe_add(
+                        row,
+                        left + 1 + prefix_width,
+                        visual_line.text[start:end],
+                        curses.A_REVERSE,
+                        available_width - prefix_width,
+                    )
+
+    def _current_search_match(self) -> SearchMatch | None:
+        """Return the selected concrete match, if search has a result."""
+        if self.search_match_index is None:
+            return None
+        return self.search_matches[self.search_match_index]
+
+    def _set_cursor(
+        self, visible: bool, row: int | None = None, column: int | None = None
+    ) -> None:
+        """Set the real terminal cursor state without failing on limited terminals."""
+        try:
+            curses.curs_set(1 if visible else 0)
+            if visible and row is not None and column is not None:
+                self.screen.move(row, column)
+        except curses.error:
+            LOG.debug("Terminal does not support changing cursor visibility")
 
     def _safe_add(
         self, row: int, column: int, text: str, attribute: int = 0, limit: int | None = None
@@ -403,16 +708,17 @@ class Viewer:
         maximum = max(0, width - column)
         if limit is not None:
             maximum = min(maximum, max(0, limit))
+        clipped = clip_to_display_width(text, maximum)
         try:
-            self.screen.addnstr(row, column, text, maximum, attribute)
+            self.screen.addstr(row, column, clipped, attribute)
         except curses.error:
-            LOG.debug("Не удалось вывести строку в позиции %s:%s", row, column)
+            LOG.debug("Could not draw text at %s:%s", row, column)
 
 
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Просмотр Markdown-файла в терминале")
-    parser.add_argument("file", type=Path, help="Markdown-файл в кодировке UTF-8")
+    parser = argparse.ArgumentParser(description="View a Markdown file in the terminal")
+    parser.add_argument("file", type=Path, help="Markdown file encoded as UTF-8")
     parser.add_argument("--version", action="version", version=f"mdview {VERSION}")
     return parser.parse_args(arguments)
 
@@ -423,7 +729,7 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         source_lines = read_markdown(args.file)
     except ValueError as error:
-        print(f"mdview: ошибка: {error}", file=sys.stderr)
+        print(f"mdview: error: {error}", file=sys.stderr)
         return 1
 
     locale.setlocale(locale.LC_ALL, "")
@@ -432,7 +738,7 @@ def main(arguments: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except curses.error as error:
-        print(f"mdview: ошибка терминала: {error}", file=sys.stderr)
+        print(f"mdview: terminal error: {error}", file=sys.stderr)
         return 1
     return 0
 
