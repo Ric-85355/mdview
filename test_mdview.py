@@ -1,7 +1,7 @@
-# test_mdview.py — created 2026-08-25, version 0.1.0.
-# Purpose: regression tests for parsing and visual/source line mapping.
+# test_mdview.py — created 2026-08-25, version 0.1.1.
+# Purpose: regression tests for document modeling and navigation state.
 # Algorithm: load the extensionless application module, feed deterministic
-# Markdown samples to pure functions, and assert their public results.
+# Markdown samples to its model and viewer, and assert state transitions.
 
 """Unit tests for mdview's non-interactive document model."""
 
@@ -29,6 +29,18 @@ def _load_application():
 
 
 mdview = _load_application()
+
+
+class FakeScreen:
+    """Provide terminal dimensions for viewer state tests."""
+
+    def __init__(self, height: int = 9, width: int = 80):
+        self.height = height
+        self.width = width
+
+    def getmaxyx(self) -> tuple[int, int]:
+        """Return configured terminal dimensions."""
+        return self.height, self.width
 
 
 class MarkdownModelTests(unittest.TestCase):
@@ -69,6 +81,79 @@ class MarkdownModelTests(unittest.TestCase):
         visual = mdview.build_visual_lines(["```", "очень_длинный_код", "```"], 6)
         self.assertEqual([line.text for line in visual], ["```", "очень_", "```"])
         self.assertTrue(all(line.style == "code" for line in visual))
+
+
+class NavigationStateTests(unittest.TestCase):
+    """Verify TOC viewport positioning and document-to-TOC synchronization."""
+
+    def _viewer(self, height: int = 9) -> object:
+        lines = [
+            "# Корень",
+            "## Перед 1",
+            "## Перед 2",
+            "## Перед 3",
+            "## Перед 4",
+            "## Перед 5",
+            "## Родитель",
+            "### Ребёнок 1",
+            "### Ребёнок 2",
+            "### Ребёнок 3",
+            "### Ребёнок 4",
+            "## Следующий",
+            "Текст 1",
+            "Текст 2",
+            "Текст 3",
+            "Текст 4",
+            "Текст 5",
+        ]
+        viewer = mdview.Viewer(FakeScreen(height), Path("sample.md"), lines)
+        viewer.visual_lines = mdview.build_visual_lines(lines, 60)
+        viewer.last_document_width = 60
+        return viewer
+
+    def test_depth_change_keeps_selected_heading(self) -> None:
+        viewer = self._viewer()
+        viewer.toc_depth = 2
+        viewer.toc_selected = 6
+        selected_source = viewer._visible_headings()[viewer.toc_selected].source_line
+        viewer._change_toc_depth(3)
+        selected = viewer._visible_headings()[viewer.toc_selected]
+        self.assertEqual(selected.source_line, selected_source)
+
+    def test_level_three_expansion_repositions_toc_viewport(self) -> None:
+        viewer = self._viewer()
+        viewer.toc_depth = 2
+        viewer.toc_selected = 6
+        viewer.toc_top = 1
+        document_top = viewer.document_top
+        viewer._change_toc_depth(3)
+        visible_height = viewer.screen.height - 3
+        selected_row = viewer.toc_selected - viewer.toc_top
+        self.assertEqual(selected_row, visible_height // 3)
+        self.assertGreater(len(viewer._visible_headings()) - viewer.toc_selected, 1)
+        self.assertEqual(viewer.document_top, document_top)
+
+    def test_document_scroll_selects_current_heading(self) -> None:
+        viewer = self._viewer(height=8)
+        viewer.toc_depth = 3
+        viewer.active_panel = "document"
+        viewer.document_top = mdview.visual_index_for_source(viewer.visual_lines, 9)
+        viewer._handle_document_key(mdview.curses.KEY_DOWN, page=4, height=8)
+        selected = viewer._visible_headings()[viewer.toc_selected]
+        self.assertEqual(selected.title, "Ребёнок 4")
+        self.assertLessEqual(viewer.toc_top, viewer.toc_selected)
+        self.assertLess(viewer.toc_selected, viewer.toc_top + 5)
+
+    def test_reverse_sync_respects_each_toc_depth(self) -> None:
+        viewer = self._viewer()
+        viewer.document_top = mdview.visual_index_for_source(viewer.visual_lines, 8)
+        expected = {1: "Корень", 2: "Родитель", 3: "Ребёнок 2"}
+        for depth, title in expected.items():
+            with self.subTest(depth=depth):
+                viewer.toc_depth = depth
+                viewer._sync_toc_to_document()
+                selected = viewer._visible_headings()[viewer.toc_selected]
+                self.assertEqual(selected.title, title)
 
 
 if __name__ == "__main__":

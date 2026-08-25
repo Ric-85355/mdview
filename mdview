@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# mdview — created 2026-08-25, version 0.1.0.
+# mdview — created 2026-08-25, version 0.1.1.
 # Purpose: read Markdown files in a two-pane curses interface.
 # Algorithm: parse source headings, map wrapped visual lines back to source lines,
 # and rebuild that mapping whenever the document pane changes width.
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 MIN_TERMINAL_HEIGHT = 8
 MIN_TERMINAL_WIDTH = 40
 MIN_PANEL_WIDTH = 12
@@ -189,6 +189,8 @@ class Viewer:
         self.document_top = visual_index_for_source(self.visual_lines, anchor_source)
         self.last_document_width = document_width
         self._clamp_document(height)
+        if self.active_panel == "document":
+            self._sync_toc_to_document()
 
     def _visible_headings(self) -> list[Heading]:
         return [heading for heading in self.headings if heading.level <= self.toc_depth]
@@ -222,7 +224,7 @@ class Viewer:
                 if heading.source_line <= current_source
             ]
             self.toc_selected = candidates[-1] if candidates else 0
-        self._ensure_toc_visible()
+        self._position_toc_selection_after_depth_change()
 
     def _handle_toc_key(self, key: int, page: int) -> None:
         headings = self._visible_headings()
@@ -248,6 +250,16 @@ class Viewer:
         self._ensure_toc_visible()
 
     def _handle_document_key(self, key: int, page: int, height: int) -> None:
+        navigation_keys = {
+            curses.KEY_UP,
+            curses.KEY_DOWN,
+            curses.KEY_PPAGE,
+            curses.KEY_NPAGE,
+            curses.KEY_HOME,
+            curses.KEY_END,
+        }
+        if key not in navigation_keys:
+            return
         if key == curses.KEY_UP:
             self.document_top -= 1
         elif key == curses.KEY_DOWN:
@@ -261,6 +273,7 @@ class Viewer:
         elif key == curses.KEY_END:
             self.document_top = len(self.visual_lines)
         self._clamp_document(height)
+        self._sync_toc_to_document()
 
     def _clamp_document(self, height: int) -> None:
         visible_height = max(1, height - 3)
@@ -274,6 +287,30 @@ class Viewer:
             self.toc_top = self.toc_selected
         elif self.toc_selected >= self.toc_top + visible_height:
             self.toc_top = self.toc_selected - visible_height + 1
+
+    def _position_toc_selection_after_depth_change(self) -> None:
+        """Place the retained selection near the viewport's upper third."""
+        height, _, _ = self._layout()
+        visible_height = max(1, height - 3)
+        maximum_top = max(0, len(self._visible_headings()) - visible_height)
+        preferred_row = visible_height // 3
+        self.toc_top = min(
+            max(0, self.toc_selected - preferred_row), maximum_top
+        )
+
+    def _sync_toc_to_document(self) -> None:
+        """Select the visible-depth heading preceding the document viewport."""
+        headings = self._visible_headings()
+        if not headings or not self.visual_lines:
+            return
+        source_line = self.visual_lines[self.document_top].source_line
+        candidates = [
+            index
+            for index, heading in enumerate(headings)
+            if heading.source_line <= source_line
+        ]
+        self.toc_selected = candidates[-1] if candidates else 0
+        self._ensure_toc_visible()
 
     def _draw(self) -> None:
         self.screen.erase()
