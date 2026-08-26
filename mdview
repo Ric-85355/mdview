@@ -29,11 +29,12 @@ SEARCH_HIGHLIGHT_ATTRIBUTE = curses.A_BOLD | curses.A_UNDERLINE
 LOG = logging.getLogger("mdview")
 
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
-UNORDERED_LIST_RE = re.compile(r"^(\s*)([-+*])\s+(.*)$")
-ORDERED_LIST_RE = re.compile(r"^(\s*)(\d+[.)])\s+(.*)$")
+UNORDERED_LIST_RE = re.compile(r"^( {0,8})(-)\s+(?!\[[ xX]\](?:\s|$))(.*)$")
+ORDERED_LIST_RE = re.compile(r"^( {0,8})(\d+\.)\s+(.*)$")
 INDENTED_CODE_RE = re.compile(r"^(?: {4}|\t)")
 LINK_RE = re.compile(r"\[([^]\n]+)\]\(([^)\n]+)\)")
 TABLE_SEPARATOR_CELL_RE = re.compile(r"-{3,}")
+UNORDERED_LIST_MARKERS = ("◆", "▸", "▪")
 
 
 @dataclass(frozen=True)
@@ -293,7 +294,8 @@ def build_visual_lines(lines: list[str], width: int) -> list[VisualLine]:
             in_fence = not in_fence
             source_line += 1
             continue
-        if in_fence or INDENTED_CODE_RE.match(line):
+        list_line = UNORDERED_LIST_RE.match(line) or ORDERED_LIST_RE.match(line)
+        if in_fence or (INDENTED_CODE_RE.match(line) and list_line is None):
             text = line[:width]
             result.append(
                 VisualLine(text, source_line, "code", tuple(range(len(text))))
@@ -327,6 +329,9 @@ def build_visual_lines(lines: list[str], width: int) -> list[VisualLine]:
             list_match = unordered or ordered
             if list_match:
                 marker = list_match.group(2)
+                if unordered:
+                    level = min(len(list_match.group(1)) // 2, 2)
+                    marker = UNORDERED_LIST_MARKERS[level]
                 prefix = f"{list_match.group(1)}{marker} "
                 rendered, content_offsets = render_minimal_markdown(
                     list_match.group(3), list_match.start(3)

@@ -101,9 +101,8 @@ The current version provides minimal display of:
 * level 3 headings in underline without the `###` marker;
 * links as `text (URL)` without decorative attributes;
 * simple tables with space-aligned columns and no separator row or outer borders;
+* unordered `-` lists and numbered `1.` lists with up to three nesting levels;
 * paragraphs;
-* unordered lists;
-* ordered lists;
 * code lines;
 * fenced code blocks.
 
@@ -115,6 +114,7 @@ Long lines inside fenced code blocks are clipped to the panel width.
 Some Markdown syntax may remain visible.
 
 Table alignment markers and complex Markdown inside table cells are not supported.
+Task lists, mixed lists, and complex nested list structures are not supported.
 
 ### Current Limitations
 
@@ -241,9 +241,8 @@ mdview filename.md
 * заголовки третьего уровня с underline без маркера `###`;
 * ссылки в виде `текст (URL)` без декоративных атрибутов;
 * простые таблицы с выравниванием колонок пробелами, без строки-разделителя и внешних границ;
+* маркированные списки с `-` и нумерованные списки с `1.` до трёх уровней вложенности;
 * абзацы;
-* маркированные списки;
-* нумерованные списки;
 * строки кода;
 * fenced code blocks.
 
@@ -255,6 +254,7 @@ bold и italic остаются видимыми и также не имеют �
 Часть Markdown-разметки может оставаться видимой.
 
 Маркеры выравнивания таблиц и сложная Markdown-разметка внутри ячеек не поддерживаются.
+Task lists, смешанные списки и сложные вложенные конструкции не поддерживаются.
 
 ### Текущие ограничения
 

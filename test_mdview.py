@@ -179,6 +179,49 @@ class MarkdownModelTests(unittest.TestCase):
         self.assertEqual([line.text for line in visual], [text])
         self.assertEqual(visual[0].style, "normal")
 
+    def test_unordered_list_preserves_three_nesting_levels(self) -> None:
+        lines = ["- First", "  - Second", "    - Third"]
+        visual = mdview.build_visual_lines(lines, 80)
+        self.assertEqual(
+            [line.text for line in visual],
+            ["◆ First", "  ▸ Second", "    ▪ Third"],
+        )
+        self.assertTrue(all(line.style == "list" for line in visual))
+        self.assertTrue(
+            all(
+                mdview.document_attribute(line.style) == mdview.curses.A_NORMAL
+                for line in visual
+            )
+        )
+
+    def test_ordered_list_preserves_numbers_and_three_nesting_levels(self) -> None:
+        lines = ["1. First", "  2. Second", "    3. Third"]
+        visual = mdview.build_visual_lines(lines, 80)
+        self.assertEqual([line.text for line in visual], lines)
+        self.assertTrue(all(line.style == "list" for line in visual))
+
+    def test_long_list_item_wraps_below_its_text(self) -> None:
+        visual = mdview.build_visual_lines(
+            ["  - long list item that wraps"], 16
+        )
+        self.assertEqual(
+            [line.text for line in visual],
+            ["  ▸ long list", "    item that", "    wraps"],
+        )
+        self.assertTrue(all(line.style == "list" for line in visual))
+
+    def test_inline_code_in_list_keeps_backticks(self) -> None:
+        text = "- Run `git status` now"
+        visual = mdview.build_visual_lines([text], 80)
+        self.assertEqual([line.text for line in visual], ["◆ Run `git status` now"])
+        self.assertEqual(visual[0].style, "list")
+
+    def test_list_like_plain_text_is_unchanged(self) -> None:
+        lines = ["-not a list", "1.not a list", "---"]
+        visual = mdview.build_visual_lines(lines, 80)
+        self.assertEqual([line.text for line in visual], lines)
+        self.assertTrue(all(line.style == "normal" for line in visual))
+
 
 class NavigationStateTests(unittest.TestCase):
     """Verify TOC viewport positioning and document-to-TOC synchronization."""
