@@ -33,7 +33,7 @@ The table of contents is built automatically from Markdown headings and supports
 * UTF-8 support, including Cyrillic text;
 * automatic line wrapping;
 * terminal resize handling;
-* basic visual distinction for headings, lists and code;
+* minimal heading and link presentation;
 * fenced code block support;
 * read-only operation;
 * no external Python dependencies.
@@ -94,14 +94,20 @@ mdview filename.md
 
 `mdview` is not a full Markdown renderer.
 
-The current version provides simplified display of:
+The current version provides minimal display of:
 
-* headings;
+* level 1 headings in uppercase and bold without the `#` marker;
+* level 2 headings in bold and underline without the `##` marker;
+* level 3 headings in underline without the `###` marker;
+* links as `text (URL)` without decorative attributes;
 * paragraphs;
 * unordered lists;
 * ordered lists;
 * code lines;
 * fenced code blocks.
+
+Inline code keeps its backticks and has no special styling. Bold and italic
+Markdown markers remain visible and have no special styling.
 
 Long lines inside fenced code blocks are clipped to the panel width.
 
@@ -164,7 +170,7 @@ python3 -m py_compile mdview test_mdview.py
 * поддержка UTF-8, включая русский текст;
 * автоматический перенос строк;
 * корректная работа при изменении размера терминала;
-* базовое визуальное различение заголовков, списков и кода;
+* минимальное отображение заголовков и ссылок;
 * поддержка fenced code blocks;
 * работа только в режиме чтения;
 * отсутствие внешних Python-зависимостей.
@@ -225,14 +231,20 @@ mdview filename.md
 
 `mdview` не является полноценным Markdown-рендерером.
 
-Текущая версия упрощённо отображает:
+Текущая версия минимально отображает:
 
-* заголовки;
+* заголовки первого уровня в uppercase с bold без маркера `#`;
+* заголовки второго уровня с bold и underline без маркера `##`;
+* заголовки третьего уровня с underline без маркера `###`;
+* ссылки в виде `текст (URL)` без декоративных атрибутов;
 * абзацы;
 * маркированные списки;
 * нумерованные списки;
 * строки кода;
 * fenced code blocks.
+
+Inline code сохраняет обратные кавычки и не имеет отдельного стиля. Маркеры
+bold и italic остаются видимыми и также не имеют отдельного стиля.
 
 Длинные строки внутри fenced code blocks обрезаются по ширине панели.
 

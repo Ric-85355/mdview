@@ -1,5 +1,5 @@
 # test_mdview.py — created 2026-08-25, version 0.2.3.
-# Purpose: regression tests for document modeling, navigation, and search.
+# Purpose: regression tests for Markdown display, navigation, and search.
 # Algorithm: load the extensionless application module, feed deterministic
 # Markdown samples to its model and viewer, and assert state transitions.
 
@@ -74,13 +74,59 @@ class MarkdownModelTests(unittest.TestCase):
         wide = mdview.build_visual_lines(lines, 30)
         narrow_target = mdview.visual_index_for_source(narrow, 1)
         wide_target = mdview.visual_index_for_source(wide, 1)
-        self.assertEqual(narrow[narrow_target].text, "##")
-        self.assertTrue(wide[wide_target].text.startswith("## Нужный"))
+        self.assertEqual(narrow[narrow_target].text, "Нужный")
+        self.assertTrue(wide[wide_target].text.startswith("Нужный"))
 
     def test_code_lines_are_clipped_not_wrapped(self) -> None:
         visual = mdview.build_visual_lines(["```", "очень_длинный_код", "```"], 6)
         self.assertEqual([line.text for line in visual], ["```", "очень_", "```"])
         self.assertTrue(all(line.style == "code" for line in visual))
+
+    def test_h1_is_uppercase_and_bold_without_marker(self) -> None:
+        visual = mdview.build_visual_lines(["# Главный heading"], 80)[0]
+        self.assertEqual(visual.text, "ГЛАВНЫЙ HEADING")
+        self.assertEqual(visual.style, "heading1")
+        self.assertEqual(mdview.document_attribute(visual.style), mdview.curses.A_BOLD)
+        self.assertEqual(visual.source_offsets[0], 2)
+
+    def test_h2_has_bold_and_underline_without_marker(self) -> None:
+        visual = mdview.build_visual_lines(["## Section"], 80)[0]
+        self.assertEqual(visual.text, "Section")
+        self.assertEqual(visual.style, "heading2")
+        self.assertEqual(
+            mdview.document_attribute(visual.style),
+            mdview.curses.A_BOLD | mdview.curses.A_UNDERLINE,
+        )
+
+    def test_h3_has_only_underline_without_marker(self) -> None:
+        visual = mdview.build_visual_lines(["### Section"], 80)[0]
+        self.assertEqual(visual.text, "Section")
+        self.assertEqual(visual.style, "heading3")
+        self.assertEqual(
+            mdview.document_attribute(visual.style), mdview.curses.A_UNDERLINE
+        )
+
+    def test_inline_code_keeps_backticks_without_reverse(self) -> None:
+        text = "Use `git status` and `[label](url)` first"
+        visual = mdview.build_visual_lines([text], 80)[0]
+        self.assertEqual(visual.text, text)
+        attribute = mdview.document_attribute(visual.style)
+        self.assertEqual(attribute, mdview.curses.A_NORMAL)
+        self.assertFalse(attribute & mdview.curses.A_REVERSE)
+
+    def test_link_keeps_url_in_parentheses_without_attributes(self) -> None:
+        source = "Visit [OpenAI](https://openai.com) now"
+        visual = mdview.build_visual_lines([source], 80)[0]
+        self.assertEqual(visual.text, "Visit OpenAI (https://openai.com) now")
+        self.assertEqual(mdview.document_attribute(visual.style), mdview.curses.A_NORMAL)
+        url_start = visual.text.index("https://")
+        self.assertEqual(visual.source_offsets[url_start], source.index("https://"))
+
+    def test_plain_text_is_unchanged(self) -> None:
+        text = "Обычный UTF-8 text"
+        visual = mdview.build_visual_lines([text], 80)[0]
+        self.assertEqual(visual.text, text)
+        self.assertEqual(visual.source_offsets, tuple(range(len(text))))
 
 
 class NavigationStateTests(unittest.TestCase):
