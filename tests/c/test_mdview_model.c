@@ -1,5 +1,5 @@
 /*
- * test_mdview_model.c — created 2026-08-26, version 0.2.3.
+ * test_mdview_model.c — created 2026-08-26, version 0.3.0.
  * Purpose: regression-test C model parity with Python mdview scenarios.
  * Algorithm: render deterministic wide-source documents, assert Markdown
  * rows/styles/offsets, and verify Unicode search and highlight ranges.

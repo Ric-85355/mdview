@@ -12,6 +12,8 @@ A lightweight TUI Markdown viewer for Linux terminals with a navigable table of 
 
 `mdview` is a lightweight read-only Markdown viewer for Linux terminals.
 
+Current release: `0.3.0`.
+
 It uses Python 3 and the standard `curses` module and does not require any external Python packages.
 
 The interface consists of two panels:
@@ -73,9 +75,9 @@ mdview filename.md
 
 ### Controls
 
-* `Tab` — switch between the table of contents and document panels;
+* `Tab` — switch panels; when leaving the TOC, jump to its selected heading;
 * `h` — activate the table of contents panel;
-* `l` — activate the document panel;
+* `l` — activate the document panel at the selected TOC heading;
 * `j`, `k` — move down or up in the active panel;
 * `↑`, `↓` — move up or down;
 * `PgUp`, `PgDn` — move one page;
@@ -144,11 +146,11 @@ Check syntax:
 python3 -m py_compile mdview test_mdview.py
 ```
 
-### Experimental C Version
+### C Version
 
-An experimental C port lives alongside the Python implementation.
-It uses `ncursesw` and wide-character input/output, and builds as
-`build/mdview-c`. The Python `mdview` remains the reference implementation.
+The C implementation lives alongside the Python implementation. It uses
+`ncursesw` and wide-character input/output and builds as `build/mdview-c`.
+Both implementations provide the same user-visible behavior.
 
 Install a C compiler, `pkg-config`, and the ncurses wide-character development
 package (for example, `libncursesw5-dev` on Debian/Ubuntu), then build and test:
@@ -178,6 +180,8 @@ and a UTF-8 pseudo-terminal smoke test.
 ### Описание
 
 `mdview` — лёгкий TUI-просмотрщик Markdown-файлов для Linux-терминала.
+
+Текущий релиз: `0.3.0`.
 
 Программа работает только в режиме чтения, использует Python 3 и стандартный модуль `curses` и не требует установки внешних Python-пакетов.
 
@@ -240,9 +244,9 @@ mdview filename.md
 
 ### Управление
 
-* `Tab` — переключение между оглавлением и документом;
+* `Tab` — переключение панелей; при выходе из оглавления выполняется переход к выбранному заголовку;
 * `h` — активировать панель оглавления;
-* `l` — активировать панель документа;
+* `l` — активировать панель документа с переходом к выбранному заголовку оглавления;
 * `j`, `k` — перемещение вниз или вверх в активной панели;
 * `↑`, `↓` — перемещение вверх и вниз;
 * `PgUp`, `PgDn` — перемещение на страницу;
@@ -311,11 +315,11 @@ python3 -m unittest -v
 python3 -m py_compile mdview test_mdview.py
 ```
 
-### Экспериментальная C-версия
+### C-версия
 
-Рядом с Python-реализацией размещён экспериментальный порт на C. Он
-использует `ncursesw` и wide-character API и собирается как
-`build/mdview-c`. Python-версия `mdview` остаётся эталонной.
+Рядом с Python-реализацией размещена реализация на C. Она использует
+`ncursesw` и wide-character API и собирается как `build/mdview-c`.
+Обе реализации предоставляют одинаковое пользовательское поведение.
 
 Для сборки нужны C-компилятор, `pkg-config` и development-пакет wide-character
 ncurses (например, `libncursesw5-dev` в Debian/Ubuntu):

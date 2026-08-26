@@ -1,5 +1,5 @@
 /*
- * mdview_c.c — created 2026-08-26, version 0.2.3.
+ * mdview_c.c — created 2026-08-26, version 0.3.0.
  * Purpose: provide the ncursesw functional analogue of the Python mdview TUI.
  * Algorithm: keep navigation/search state over the shared source-mapped model,
  * rebuild rows after resize, and render equivalent panels, styles, and prompts.
@@ -18,7 +18,7 @@
 #include <wchar.h>
 #include <wctype.h>
 
-#define VERSION "0.2.3"
+#define VERSION "0.3.0"
 #define MIN_TERMINAL_HEIGHT 8
 #define MIN_TERMINAL_WIDTH 40
 #define MIN_PANEL_WIDTH 12
@@ -513,6 +513,17 @@ static void change_toc_depth(Viewer *viewer, int depth, int height)
     }
 }
 
+static void jump_to_selected_heading(Viewer *viewer)
+{
+    MdHeading *heading = visible_heading_at(viewer, viewer->toc_selected);
+
+    if (heading != NULL) {
+        viewer->document_top = md_visual_index_for_source(
+            &viewer->visual, heading->source_line
+        );
+    }
+}
+
 static void handle_toc_key(Viewer *viewer, int key, int page, int height)
 {
     size_t count = visible_heading_count(viewer);
@@ -537,12 +548,7 @@ static void handle_toc_key(Viewer *viewer, int key, int page, int height)
     } else if (key == KEY_END) {
         viewer->toc_selected = count - 1;
     } else if (key == '\n' || key == '\r' || key == KEY_ENTER) {
-        MdHeading *heading = visible_heading_at(viewer, viewer->toc_selected);
-        if (heading != NULL) {
-            viewer->document_top = md_visual_index_for_source(
-                &viewer->visual, heading->source_line
-            );
-        }
+        jump_to_selected_heading(viewer);
     }
     ensure_toc_visible(viewer, height);
 }
@@ -713,13 +719,19 @@ static bool handle_key(Viewer *viewer, wint_t input, bool function_key, int heig
         return true;
     }
     if (!function_key && input == L'l') {
+        if (viewer->active_panel == PANEL_TOC) {
+            jump_to_selected_heading(viewer);
+        }
         viewer->active_panel = PANEL_DOCUMENT;
         return true;
     }
     if (!function_key && input == L'\t') {
-        viewer->active_panel = viewer->active_panel == PANEL_TOC
-            ? PANEL_DOCUMENT
-            : PANEL_TOC;
+        if (viewer->active_panel == PANEL_TOC) {
+            jump_to_selected_heading(viewer);
+            viewer->active_panel = PANEL_DOCUMENT;
+        } else {
+            viewer->active_panel = PANEL_TOC;
+        }
         return true;
     }
     if (!function_key && input >= L'1' && input <= L'3') {

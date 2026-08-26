@@ -1,5 +1,5 @@
 #!/bin/sh
-# test_cli.sh — created 2026-08-26, version 0.2.3.
+# test_cli.sh — created 2026-08-26, version 0.3.0.
 # Purpose: regression-test the non-curses mdview-c command-line interface.
 # Algorithm: invoke help, version, and error paths and validate status/text.
 
@@ -12,7 +12,7 @@ printf '%s' "$help_output" | grep -F "usage: mdview-c [-h] [--version] file" >/d
 printf '%s' "$help_output" | grep -F "View a Markdown file in the terminal" >/dev/null
 
 version_output=$($program --version)
-test "$version_output" = "mdview-c 0.2.3"
+test "$version_output" = "mdview-c 0.3.0"
 
 set +e
 missing_output=$($program 2>&1)

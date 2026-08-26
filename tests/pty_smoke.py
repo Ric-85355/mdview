@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pty_smoke.py — created 2026-08-26, version 0.2.3.
+# pty_smoke.py — created 2026-08-26, version 0.3.0.
 # Purpose: exercise either mdview implementation in a real UTF-8 pseudo-TTY.
 # Algorithm: start the viewer on a controlled terminal, drive panel/search/
 # navigation/resize/quit keys, inspect output, and verify terminal restoration.

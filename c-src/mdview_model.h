@@ -1,5 +1,5 @@
 /*
- * mdview_model.h — created 2026-08-26, experimental version 0.2.3.
+ * mdview_model.h — created 2026-08-26, version 0.3.0.
  * Purpose: public Unicode document, Markdown-render, and search model for mdview-c.
  * Algorithm: retain source text as wide characters, render source-mapped visual
  * rows, and expose source-level search matches independently from curses.

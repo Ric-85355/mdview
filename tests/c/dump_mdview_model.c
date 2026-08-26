@@ -1,5 +1,5 @@
 /*
- * dump_mdview_model.c — created 2026-08-26, version 0.2.3.
+ * dump_mdview_model.c — created 2026-08-26, version 0.3.0.
  * Purpose: expose the C visual model in a deterministic parity-test format.
  * Algorithm: load one UTF-8 document, render it at the requested width, then
  * print source line, style, offsets, and text for comparison with Python.

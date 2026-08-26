@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# compare_models.py — created 2026-08-26, version 0.2.3.
+# compare_models.py — created 2026-08-26, version 0.3.0.
 # Purpose: compare C rendering with the current Python implementation.
 # Algorithm: render one fixture through both models and compare every visual
 # row's text, style, source line, and source-character offset mapping.

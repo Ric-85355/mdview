@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# mdview — created 2026-08-25, version 0.2.3.
+# mdview — created 2026-08-25, version 0.3.0.
 # Purpose: read Markdown files in a two-pane curses interface.
 # Algorithm: parse and search source lines, map wrapped visual lines back to
 # source lines, and rebuild that mapping whenever the document width changes.
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.2.3"
+VERSION = "0.3.0"
 MIN_TERMINAL_HEIGHT = 8
 MIN_TERMINAL_WIDTH = 40
 MIN_PANEL_WIDTH = 12
@@ -574,9 +574,15 @@ class Viewer:
         elif key == "h":
             self.active_panel = "toc"
         elif key == "l":
+            if self.active_panel == "toc":
+                self._jump_to_selected_heading()
             self.active_panel = "document"
         elif key == "\t":
-            self.active_panel = "document" if self.active_panel == "toc" else "toc"
+            if self.active_panel == "toc":
+                self._jump_to_selected_heading()
+                self.active_panel = "document"
+            else:
+                self.active_panel = "toc"
         elif key in ("1", "2", "3"):
             self._change_toc_depth(int(key))
         else:
@@ -682,10 +688,16 @@ class Viewer:
         elif key == curses.KEY_END:
             self.toc_selected = last
         elif key in (curses.KEY_ENTER, "\n", "\r"):
+            self._jump_to_selected_heading()
+        self._ensure_toc_visible()
+
+    def _jump_to_selected_heading(self) -> None:
+        """Position the document at the currently selected visible heading."""
+        headings = self._visible_headings()
+        if headings:
             self.document_top = visual_index_for_source(
                 self.visual_lines, headings[self.toc_selected].source_line
             )
-        self._ensure_toc_visible()
 
     def _handle_document_key(self, key: int | str, page: int, height: int) -> None:
         navigation_keys = {

@@ -1,4 +1,4 @@
-# test_mdview.py — created 2026-08-25, version 0.2.3.
+# test_mdview.py — created 2026-08-25, version 0.3.0.
 # Purpose: regression tests for Markdown display, navigation, and search.
 # Algorithm: load the extensionless application module, feed deterministic
 # Markdown samples to its model and viewer, and assert state transitions.
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -29,6 +30,19 @@ def _load_application():
 
 
 mdview = _load_application()
+
+
+class CliTests(unittest.TestCase):
+    """Verify release metadata exposed by the Python command line."""
+
+    def test_version(self) -> None:
+        process = subprocess.run(
+            [str(APP_PATH), "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(process.stdout, "mdview 0.3.0\n")
 
 
 class FakeScreen:
@@ -309,26 +323,64 @@ class NavigationStateTests(unittest.TestCase):
         self.assertEqual(viewer.document_top, 3)
         self.assertEqual(viewer.toc_selected, 4)
 
-    def test_l_activates_document_without_moving_positions(self) -> None:
+    def test_l_activates_document_at_selected_heading(self) -> None:
         viewer = self._viewer()
         viewer.document_top = 3
         viewer.toc_selected = 4
+        selected_source = viewer._visible_headings()[4].source_line
         viewer._handle_key("l")
         self.assertEqual(viewer.active_panel, "document")
+        self.assertEqual(
+            viewer.document_top,
+            mdview.visual_index_for_source(viewer.visual_lines, selected_source),
+        )
+        self.assertEqual(viewer.toc_selected, 4)
+
+        viewer.document_top = 3
+        viewer._handle_key("l")
         self.assertEqual(viewer.document_top, 3)
         self.assertEqual(viewer.toc_selected, 4)
 
-        viewer._handle_key("l")
-        self.assertEqual(viewer.document_top, 3)
-        self.assertEqual(viewer.toc_selected, 4)
+    def test_tab_activates_document_at_selected_heading(self) -> None:
+        viewer = self._viewer()
+        viewer.document_top = 3
+        viewer.toc_selected = 5
+        selected_source = viewer._visible_headings()[5].source_line
+        viewer._handle_key("\t")
+        self.assertEqual(viewer.active_panel, "document")
+        self.assertEqual(
+            viewer.document_top,
+            mdview.visual_index_for_source(viewer.visual_lines, selected_source),
+        )
+
+        viewer._handle_key("\t")
+        self.assertEqual(viewer.active_panel, "toc")
+        self.assertEqual(
+            viewer.document_top,
+            mdview.visual_index_for_source(viewer.visual_lines, selected_source),
+        )
+
+    def test_enter_still_jumps_without_activating_document(self) -> None:
+        viewer = self._viewer()
+        viewer.toc_selected = 3
+        selected_source = viewer._visible_headings()[3].source_line
+        viewer._handle_key("\n")
+        self.assertEqual(viewer.active_panel, "toc")
+        self.assertEqual(
+            viewer.document_top,
+            mdview.visual_index_for_source(viewer.visual_lines, selected_source),
+        )
 
     def test_j_and_k_move_contents_selection(self) -> None:
         viewer = self._viewer()
         viewer.toc_selected = 1
+        document_top = viewer.document_top
         viewer._handle_key("j")
         self.assertEqual(viewer.toc_selected, 2)
+        self.assertEqual(viewer.document_top, document_top)
         viewer._handle_key("k")
         self.assertEqual(viewer.toc_selected, 1)
+        self.assertEqual(viewer.document_top, document_top)
 
     def test_j_and_k_scroll_document(self) -> None:
         viewer = self._viewer(height=8)

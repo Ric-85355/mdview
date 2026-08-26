@@ -1,5 +1,5 @@
 /*
- * mdview_model.c — created 2026-08-26, experimental version 0.2.3.
+ * mdview_model.c — created 2026-08-26, version 0.3.0.
  * Purpose: implement the curses-independent Python-compatible mdview model.
  * Algorithm: parse UTF-8 into wide source lines, apply the same minimal
  * Markdown transforms, wrap with source offsets, and search source text.
