@@ -1,4 +1,4 @@
-# test_mdview.py — created 2026-08-25, version 0.2.2.
+# test_mdview.py — created 2026-08-25, version 0.2.3.
 # Purpose: regression tests for document modeling, navigation, and search.
 # Algorithm: load the extensionless application module, feed deterministic
 # Markdown samples to its model and viewer, and assert state transitions.
@@ -154,6 +154,68 @@ class NavigationStateTests(unittest.TestCase):
                 viewer._sync_toc_to_document()
                 selected = viewer._visible_headings()[viewer.toc_selected]
                 self.assertEqual(selected.title, title)
+
+    def test_h_activates_contents_without_moving_positions(self) -> None:
+        viewer = self._viewer()
+        viewer.active_panel = "document"
+        viewer.document_top = 3
+        viewer.toc_selected = 4
+        viewer._handle_key("h")
+        self.assertEqual(viewer.active_panel, "toc")
+        self.assertEqual(viewer.document_top, 3)
+        self.assertEqual(viewer.toc_selected, 4)
+
+        viewer._handle_key("h")
+        self.assertEqual(viewer.document_top, 3)
+        self.assertEqual(viewer.toc_selected, 4)
+
+    def test_l_activates_document_without_moving_positions(self) -> None:
+        viewer = self._viewer()
+        viewer.document_top = 3
+        viewer.toc_selected = 4
+        viewer._handle_key("l")
+        self.assertEqual(viewer.active_panel, "document")
+        self.assertEqual(viewer.document_top, 3)
+        self.assertEqual(viewer.toc_selected, 4)
+
+        viewer._handle_key("l")
+        self.assertEqual(viewer.document_top, 3)
+        self.assertEqual(viewer.toc_selected, 4)
+
+    def test_j_and_k_move_contents_selection(self) -> None:
+        viewer = self._viewer()
+        viewer.toc_selected = 1
+        viewer._handle_key("j")
+        self.assertEqual(viewer.toc_selected, 2)
+        viewer._handle_key("k")
+        self.assertEqual(viewer.toc_selected, 1)
+
+    def test_j_and_k_scroll_document(self) -> None:
+        viewer = self._viewer(height=8)
+        viewer.active_panel = "document"
+        viewer.document_top = 1
+        viewer._handle_key("j")
+        self.assertEqual(viewer.document_top, 2)
+        viewer._handle_key("k")
+        self.assertEqual(viewer.document_top, 1)
+
+    def test_j_and_k_keep_toc_synchronized_with_document(self) -> None:
+        viewer = self._viewer(height=8)
+        viewer.active_panel = "document"
+        viewer.document_top = mdview.visual_index_for_source(viewer.visual_lines, 9)
+        viewer._sync_toc_to_document()
+        self.assertEqual(
+            viewer._visible_headings()[viewer.toc_selected].title, "Ребёнок 3"
+        )
+
+        viewer._handle_key("j")
+        self.assertEqual(
+            viewer._visible_headings()[viewer.toc_selected].title, "Ребёнок 4"
+        )
+        viewer._handle_key("k")
+        self.assertEqual(
+            viewer._visible_headings()[viewer.toc_selected].title, "Ребёнок 3"
+        )
 
 
 class SearchTests(unittest.TestCase):

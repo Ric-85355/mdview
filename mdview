@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# mdview — created 2026-08-25, version 0.2.2.
+# mdview — created 2026-08-25, version 0.2.3.
 # Purpose: read Markdown files in a two-pane curses interface.
 # Algorithm: parse and search source lines, map wrapped visual lines back to
 # source lines, and rebuild that mapping whenever the document width changes.
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 MIN_TERMINAL_HEIGHT = 8
 MIN_TERMINAL_WIDTH = 40
 MIN_PANEL_WIDTH = 12
@@ -408,14 +408,23 @@ class Viewer:
             self._repeat_search(1)
         elif key == ",":
             self._repeat_search(-1)
+        elif key == "h":
+            self.active_panel = "toc"
+        elif key == "l":
+            self.active_panel = "document"
         elif key == "\t":
             self.active_panel = "document" if self.active_panel == "toc" else "toc"
         elif key in ("1", "2", "3"):
             self._change_toc_depth(int(key))
-        elif self.active_panel == "toc":
-            self._handle_toc_key(key, page)
         else:
-            self._handle_document_key(key, page, height)
+            navigation_key = {
+                "j": curses.KEY_DOWN,
+                "k": curses.KEY_UP,
+            }.get(key, key)
+            if self.active_panel == "toc":
+                self._handle_toc_key(navigation_key, page)
+            else:
+                self._handle_document_key(navigation_key, page, height)
 
     def _handle_search_input(self, key: int | str) -> None:
         """Edit, cancel, or submit the active Unicode search prompt."""
@@ -614,7 +623,7 @@ class Viewer:
         elif self.search_message is not None:
             status = f" {self.search_message}"
         else:
-            status = " 1/2/3 — TOC depth   Tab — panel   / — search   Q — quit "
+            status = " h Contents  l Document  j/k move  Tab toggle  1/2/3 TOC  / search  Q quit "
         self._safe_add(height - 1, 0, status.ljust(width), curses.A_REVERSE)
         if self.search_input is not None:
             cursor_column = min(width - 1, display_width(status))

@@ -74,6 +74,9 @@ mdview filename.md
 ### Controls
 
 * `Tab` — switch between the table of contents and document panels;
+* `h` — activate the table of contents panel;
+* `l` — activate the document panel;
+* `j`, `k` — move down or up in the active panel;
 * `↑`, `↓` — move up or down;
 * `PgUp`, `PgDn` — move one page;
 * `Home`, `End` — jump to the beginning or end;
@@ -202,6 +205,9 @@ mdview filename.md
 ### Управление
 
 * `Tab` — переключение между оглавлением и документом;
+* `h` — активировать панель оглавления;
+* `l` — активировать панель документа;
+* `j`, `k` — перемещение вниз или вверх в активной панели;
 * `↑`, `↓` — перемещение вверх и вниз;
 * `PgUp`, `PgDn` — перемещение на страницу;
 * `Home`, `End` — начало или конец;
