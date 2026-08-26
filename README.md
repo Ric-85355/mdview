@@ -144,6 +144,33 @@ Check syntax:
 python3 -m py_compile mdview test_mdview.py
 ```
 
+### Experimental C Version
+
+An experimental C port lives alongside the Python implementation.
+It uses `ncursesw` and wide-character input/output, and builds as
+`build/mdview-c`. The Python `mdview` remains the reference implementation.
+
+Install a C compiler, `pkg-config`, and the ncurses wide-character development
+package (for example, `libncursesw5-dev` on Debian/Ubuntu), then build and test:
+
+```console
+make
+make test
+```
+
+Run the C version with a UTF-8 Markdown file:
+
+```console
+./build/mdview-c README.md
+```
+
+The C port now follows the Python version's user-visible behavior: the
+two-panel TUI and navigation, search and exact match highlighting, resize
+reflow with source mapping, and the same minimal rendering for headings,
+links, inline and fenced code, lists, and tables. `make test` includes
+curses-independent C tests, CLI checks, model parity checks against Python,
+and a UTF-8 pseudo-terminal smoke test.
+
 ---
 
 ## Русский
@@ -283,3 +310,29 @@ python3 -m unittest -v
 ```console
 python3 -m py_compile mdview test_mdview.py
 ```
+
+### Экспериментальная C-версия
+
+Рядом с Python-реализацией размещён экспериментальный порт на C. Он
+использует `ncursesw` и wide-character API и собирается как
+`build/mdview-c`. Python-версия `mdview` остаётся эталонной.
+
+Для сборки нужны C-компилятор, `pkg-config` и development-пакет wide-character
+ncurses (например, `libncursesw5-dev` в Debian/Ubuntu):
+
+```console
+make
+make test
+```
+
+Запуск C-версии с UTF-8 Markdown-файлом:
+
+```console
+./build/mdview-c README.md
+```
+
+C-порт повторяет пользовательское поведение Python-версии: двухпанельный TUI
+и навигацию, поиск с точной подсветкой, перестроение после resize с source
+mapping и тот же минимальный рендер заголовков, ссылок, inline/fenced code,
+списков и таблиц. `make test` запускает автономные C-тесты, проверки CLI,
+сравнение модели с Python-эталоном и UTF-8 smoke-тест в псевдотерминале.
