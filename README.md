@@ -100,6 +100,7 @@ The current version provides minimal display of:
 * level 2 headings in bold and underline without the `##` marker;
 * level 3 headings in underline without the `###` marker;
 * links as `text (URL)` without decorative attributes;
+* simple tables with space-aligned columns and no separator row or outer borders;
 * paragraphs;
 * unordered lists;
 * ordered lists;
@@ -112,6 +113,8 @@ Markdown markers remain visible and have no special styling.
 Long lines inside fenced code blocks are clipped to the panel width.
 
 Some Markdown syntax may remain visible.
+
+Table alignment markers and complex Markdown inside table cells are not supported.
 
 ### Current Limitations
 
@@ -237,6 +240,7 @@ mdview filename.md
 * заголовки второго уровня с bold и underline без маркера `##`;
 * заголовки третьего уровня с underline без маркера `###`;
 * ссылки в виде `текст (URL)` без декоративных атрибутов;
+* простые таблицы с выравниванием колонок пробелами, без строки-разделителя и внешних границ;
 * абзацы;
 * маркированные списки;
 * нумерованные списки;
@@ -249,6 +253,8 @@ bold и italic остаются видимыми и также не имеют �
 Длинные строки внутри fenced code blocks обрезаются по ширине панели.
 
 Часть Markdown-разметки может оставаться видимой.
+
+Маркеры выравнивания таблиц и сложная Markdown-разметка внутри ячеек не поддерживаются.
 
 ### Текущие ограничения
 

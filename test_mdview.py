@@ -128,6 +128,57 @@ class MarkdownModelTests(unittest.TestCase):
         self.assertEqual(visual.text, text)
         self.assertEqual(visual.source_offsets, tuple(range(len(text))))
 
+    def test_simple_table_hides_separator_and_outer_borders(self) -> None:
+        lines = [
+            "| Article type | Maximum character length |",
+            "| ------------ | ------------------------ |",
+            "| articles | 31 |",
+            "| categories | 27 |",
+            "| map topics | 30 |",
+        ]
+        visual = mdview.build_visual_lines(lines, 80)
+        self.assertEqual(
+            [line.text for line in visual],
+            [
+                "Article type | Maximum character length",
+                "articles     | 31",
+                "categories   | 27",
+                "map topics   | 30",
+            ],
+        )
+        self.assertTrue(all(line.style == "table" for line in visual))
+        self.assertEqual([line.source_line for line in visual], [0, 2, 3, 4])
+        self.assertEqual(visual[1].source_offsets[0], lines[2].index("articles"))
+        self.assertTrue(
+            all(
+                mdview.document_attribute(line.style) == mdview.curses.A_NORMAL
+                for line in visual
+            )
+        )
+
+    def test_table_columns_use_longest_cell_width(self) -> None:
+        lines = [
+            "| Name | Value |",
+            "| --- | --- |",
+            "| a | longer value |",
+            "| longest name | x |",
+        ]
+        visual = mdview.build_visual_lines(lines, 80)
+        self.assertEqual(
+            [line.text for line in visual],
+            [
+                "Name         | Value",
+                "a            | longer value",
+                "longest name | x",
+            ],
+        )
+
+    def test_pipe_in_plain_text_does_not_create_table(self) -> None:
+        text = "Обычный текст | не таблица"
+        visual = mdview.build_visual_lines([text], 80)
+        self.assertEqual([line.text for line in visual], [text])
+        self.assertEqual(visual[0].style, "normal")
+
 
 class NavigationStateTests(unittest.TestCase):
     """Verify TOC viewport positioning and document-to-TOC synchronization."""
