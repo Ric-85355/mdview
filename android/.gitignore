@@ -1,0 +1,12 @@
+# .gitignore — created 2026-08-26, version 0.1.0.
+# Purpose: exclude local Android and Gradle output from version control.
+# Algorithm: ignore generated builds, IDE state, SDK paths, and native caches.
+
+.gradle/
+.kotlin/
+.idea/
+**/build/
+local.properties
+*.iml
+.externalNativeBuild/
+.cxx/

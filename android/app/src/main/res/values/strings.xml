@@ -1,0 +1,10 @@
+<!--
+  strings.xml — created 2026-08-26, version 0.1.0.
+  Purpose: define user-visible Android strings and accessibility labels.
+  Algorithm: centralize the compact English interface text for localization.
+-->
+<resources>
+    <string name="app_name">mdview</string>
+    <string name="open_document">Open Markdown file</string>
+    <string name="search">Search</string>
+</resources>

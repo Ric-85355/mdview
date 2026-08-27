@@ -1,0 +1,11 @@
+<!--
+  themes.xml — created 2026-08-26, version 0.1.0.
+  Purpose: provide a minimal system light/dark compatible activity theme.
+  Algorithm: let Compose draw the UI while Android supplies a no-action-bar base.
+-->
+<resources>
+    <style name="Theme.Mdview" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

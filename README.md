@@ -173,6 +173,36 @@ links, inline and fenced code, lists, and tables. `make test` includes
 curses-independent C tests, CLI checks, model parity checks against Python,
 and a UTF-8 pseudo-terminal smoke test.
 
+### Android Version
+
+The independent experimental Android application is in `android/`. It targets
+Android 9 (API 28) and newer and uses Kotlin, Jetpack Compose, and standard
+Storage Access Framework APIs. It can select a local Markdown document through
+the system picker or receive one through **Open with** without broad storage
+permission.
+
+The first version renders headings, paragraphs, bullet and numbered lists,
+bold, italic, inline code, fenced code blocks, and links. It provides an
+overlay table of contents for H1–H3 with cyclic depth selection, touch and
+gesture controls, section synchronization, document search, per-URI reading
+position restoration, rotation-safe state, and system light/dark themes.
+
+Build prerequisites are JDK 17 and an Android SDK containing platform API 35.
+The Gradle wrapper downloads the remaining build dependencies:
+
+```console
+cd android
+./gradlew testDebugUnitTest assembleDebug lintDebug
+```
+
+The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+Links are styled for reading but are not opened in this first version. Images,
+tables, editing, and a dedicated tablet layout are not implemented.
+
+The current experimental build permanently reserves a 50 dp bottom banner with
+a local advertising placeholder for UX evaluation. No advertising network,
+tracking, or network permission has been added.
+
 ---
 
 ## Русский
@@ -340,3 +370,32 @@ C-порт повторяет пользовательское поведени�
 mapping и тот же минимальный рендер заголовков, ссылок, inline/fenced code,
 списков и таблиц. `make test` запускает автономные C-тесты, проверки CLI,
 сравнение модели с Python-эталоном и UTF-8 smoke-тест в псевдотерминале.
+
+### Android-версия
+
+Независимое экспериментальное Android-приложение находится в `android/`.
+Оно работает на Android 9 (API 28) и новее, написано на Kotlin и Jetpack
+Compose и использует Storage Access Framework. Markdown-файл можно выбрать
+через системный picker или передать через «Открыть с помощью» без полного
+доступа к файловой системе.
+
+Первая версия отображает заголовки, абзацы, маркированные и нумерованные
+списки, bold, italic, inline code, fenced code blocks и ссылки. Есть накладное
+оглавление H1–H3 с выбором глубины, жестами и синхронизацией, поиск,
+восстановление позиции для каждого URI, сохранение состояния при повороте и
+системные светлая/тёмная темы.
+
+Для сборки нужны JDK 17 и Android SDK с platform API 35:
+
+```console
+cd android
+./gradlew testDebugUnitTest assembleDebug lintDebug
+```
+
+Debug APK создаётся в `android/app/build/outputs/apk/debug/app-debug.apk`.
+Ссылки в первой версии стилизуются, но не открываются. Изображения, таблицы,
+редактирование и отдельный планшетный интерфейс пока не реализованы.
+
+Текущая экспериментальная сборка постоянно резервирует внизу 50 dp для
+локальной рекламной UX-заглушки. Рекламная сеть, tracking и сетевые
+разрешения не добавлены.

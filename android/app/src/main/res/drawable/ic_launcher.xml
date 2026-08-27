@@ -1,0 +1,17 @@
+<!--
+  ic_launcher.xml — created 2026-08-26, version 0.1.0.
+  Purpose: provide a dependency-free application icon for mdview.
+  Algorithm: draw a document tile with three Markdown-style text lines.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#3F51B5"
+        android:pathData="M6,4h36v40h-36z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,12h24v4h-24zM12,22h18v3h-18zM12,31h21v3h-21z" />
+</vector>
