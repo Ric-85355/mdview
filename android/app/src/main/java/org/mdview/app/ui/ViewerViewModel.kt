@@ -19,6 +19,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import org.mdview.app.data.DocumentRepository
 import org.mdview.app.data.ReadingPositionStore
+import org.mdview.app.markdown.DocumentSectionResolver
 import org.mdview.app.markdown.DocumentSearch
 import org.mdview.app.markdown.MarkdownDocument
 import org.mdview.app.markdown.MarkdownHeading
@@ -49,7 +50,7 @@ class ViewerViewModel(
             query = savedStateHandle["searchQuery"] ?: "",
         ),
     )
-    var restoredBlockIndex by mutableIntStateOf(0)
+    var currentDocumentBlockIndex by mutableIntStateOf(0)
         private set
 
     init {
@@ -82,9 +83,9 @@ class ViewerViewModel(
             repository.load(uri).fold(
                 onSuccess = { loaded ->
                     document = loaded
-                    restoredBlockIndex = positions.load(loaded.id)
+                    currentDocumentBlockIndex = positions.load(loaded.id)
                         .coerceAtMost(loaded.blocks.lastIndex.coerceAtLeast(0))
-                    selectedHeadingIndex = headingIndexForBlock(restoredBlockIndex)
+                    synchronizeCurrentSection()
                     updateSearch(searchQuery)
                     loading = false
                 },
@@ -100,23 +101,24 @@ class ViewerViewModel(
     fun cycleTocDepth() {
         tocDepth = tocDepth % 3 + 1
         savedStateHandle["tocDepth"] = tocDepth
-        selectedHeadingIndex = headingIndexForBlock(restoredBlockIndex)
+        synchronizeCurrentSection()
     }
 
     fun updateTocOpen(open: Boolean) {
         tocOpen = open
         savedStateHandle["tocOpen"] = open
+        if (open) synchronizeCurrentSection()
     }
 
     fun selectHeading(heading: MarkdownHeading): Int {
-        selectedHeadingIndex = visibleHeadings.indexOf(heading).coerceAtLeast(0)
+        onDocumentPosition(heading.blockIndex)
         return heading.blockIndex
     }
 
     fun onDocumentPosition(blockIndex: Int) {
-        restoredBlockIndex = blockIndex
+        currentDocumentBlockIndex = blockIndex
         document?.let { positions.save(it.id, blockIndex) }
-        selectedHeadingIndex = headingIndexForBlock(blockIndex)
+        synchronizeCurrentSection()
     }
 
     fun openSearch() {
@@ -149,8 +151,11 @@ class ViewerViewModel(
         return currentMatch?.blockIndex
     }
 
-    private fun headingIndexForBlock(blockIndex: Int): Int {
-        val headings = visibleHeadings
-        return headings.indexOfLast { it.blockIndex <= blockIndex }.coerceAtLeast(0)
+    private fun synchronizeCurrentSection() {
+        selectedHeadingIndex = DocumentSectionResolver.visibleHeadingIndex(
+            headings = document?.headings.orEmpty(),
+            blockIndex = currentDocumentBlockIndex,
+            depth = tocDepth,
+        )
     }
 }

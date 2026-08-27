@@ -183,8 +183,8 @@ permission.
 
 The first version renders headings, paragraphs, bullet and numbered lists,
 bold, italic, inline code, fenced code blocks, and links. It provides an
-overlay table of contents for H1–H3 with cyclic depth selection, touch and
-gesture controls, section synchronization, document search, per-URI reading
+separate table of contents area for H1–H3 with a depth badge, context-sensitive TOC
+button, double-tap closing, section synchronization, document search, per-URI reading
 position restoration, rotation-safe state, and system light/dark themes.
 
 Build prerequisites are JDK 17 and an Android SDK containing platform API 35.
@@ -380,8 +380,9 @@ Compose и использует Storage Access Framework. Markdown-файл мо
 доступа к файловой системе.
 
 Первая версия отображает заголовки, абзацы, маркированные и нумерованные
-списки, bold, italic, inline code, fenced code blocks и ссылки. Есть накладное
-оглавление H1–H3 с выбором глубины, жестами и синхронизацией, поиск,
+списки, bold, italic, inline code, fenced code blocks и ссылки. Есть отдельная
+область оглавления H1–H3 с бейджем глубины, контекстной TOC-кнопкой, закрытием
+по double tap и синхронизацией, поиск,
 восстановление позиции для каждого URI, сохранение состояния при повороте и
 системные светлая/тёмная темы.
 

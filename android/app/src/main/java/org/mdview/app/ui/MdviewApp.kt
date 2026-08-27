@@ -1,6 +1,6 @@
 /*
  * MdviewApp.kt — created 2026-08-26, version 0.1.0.
- * Purpose: render the Android reader, overlay TOC, search, and top controls.
+ * Purpose: render the Android reader, separate TOC area, search, and top controls.
  * Algorithm: display parsed blocks in a LazyColumn, synchronize its first item
  * with ViewModel state, and navigate by block indexes for TOC/search/restore.
  */
@@ -12,7 +12,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -32,6 +33,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,7 +48,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,10 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -88,10 +87,14 @@ fun MdviewApp(viewModel: ViewerViewModel, onOpenDocument: () -> Unit) {
         val scope = rememberCoroutineScope()
         var aboutOpen by remember { mutableStateOf(false) }
         val document = viewModel.document
+        val navigateToBlock: (Int) -> Unit = { blockIndex ->
+            viewModel.onDocumentPosition(blockIndex)
+            scope.launch { listState.animateScrollToItem(blockIndex) }
+        }
 
         LaunchedEffect(document?.id) {
             if (document != null && document.blocks.isNotEmpty()) {
-                listState.scrollToItem(viewModel.restoredBlockIndex)
+                listState.scrollToItem(viewModel.currentDocumentBlockIndex)
             }
         }
         LaunchedEffect(listState, document?.id) {
@@ -106,8 +109,10 @@ fun MdviewApp(viewModel: ViewerViewModel, onOpenDocument: () -> Unit) {
                     depth = viewModel.tocDepth,
                     tocOpen = viewModel.tocOpen,
                     onOpenDocument = onOpenDocument,
-                    onCycleDepth = viewModel::cycleTocDepth,
-                    onToggleToc = { viewModel.updateTocOpen(!viewModel.tocOpen) },
+                    onTocAction = {
+                        if (viewModel.tocOpen) viewModel.cycleTocDepth()
+                        else viewModel.updateTocOpen(true)
+                    },
                     onSearch = viewModel::openSearch,
                     onAbout = { aboutOpen = true },
                 )
@@ -120,14 +125,10 @@ fun MdviewApp(viewModel: ViewerViewModel, onOpenDocument: () -> Unit) {
                         current = viewModel.currentMatchIndex,
                         count = viewModel.searchMatches.size,
                         onQueryChange = { query ->
-                            viewModel.updateSearch(query)?.let { block ->
-                                scope.launch { listState.animateScrollToItem(block) }
-                            }
+                            viewModel.updateSearch(query)?.let(navigateToBlock)
                         },
                         onMove = { direction ->
-                            viewModel.nextMatch(direction)?.let { block ->
-                                scope.launch { listState.animateScrollToItem(block) }
-                            }
+                            viewModel.nextMatch(direction)?.let(navigateToBlock)
                         },
                         onClose = viewModel::closeSearch,
                     )
@@ -161,8 +162,7 @@ private fun ReaderTopBar(
     depth: Int,
     tocOpen: Boolean,
     onOpenDocument: () -> Unit,
-    onCycleDepth: () -> Unit,
-    onToggleToc: () -> Unit,
+    onTocAction: () -> Unit,
     onSearch: () -> Unit,
     onAbout: () -> Unit,
 ) {
@@ -188,11 +188,29 @@ private fun ReaderTopBar(
                     )
                 }
             }
-            TextButton(onClick = onCycleDepth) { Text(depth.toString(), fontSize = 20.sp) }
-            TextButton(onClick = onToggleToc) {
-                Text(if (tocOpen) "▴" else "☷", fontSize = 22.sp)
-            }
+            TocButton(depth = depth, tocOpen = tocOpen, onClick = onTocAction)
             TextButton(onClick = onSearch) { Text("⌕", fontSize = 26.sp) }
+        }
+    }
+}
+
+@Composable
+private fun TocButton(depth: Int, tocOpen: Boolean, onClick: () -> Unit) {
+    Box {
+        TextButton(onClick = onClick) {
+            Text("☷", fontSize = 22.sp)
+        }
+        Surface(
+            modifier = Modifier.size(18.dp).align(Alignment.TopEnd),
+            shape = CircleShape,
+            color = if (tocOpen) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.secondary,
+            contentColor = if (tocOpen) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.onSecondary,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(depth.toString(), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -206,43 +224,39 @@ private fun ReaderBody(
     onScrollTo: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var dragStart by remember { mutableStateOf(Offset.Zero) }
-    var dragDistance by remember { mutableFloatStateOf(0f) }
-    val threshold = with(LocalDensity.current) { 72.dp.toPx() }
-    Box(
-        modifier.fillMaxSize().pointerInput(viewModel.tocOpen) {
-            detectVerticalDragGestures(
-                onDragStart = { dragStart = it; dragDistance = 0f },
-                onVerticalDrag = { _, amount -> dragDistance += amount },
-                onDragEnd = {
-                    if (!viewModel.tocOpen && dragStart.y <= threshold && dragDistance >= threshold) {
-                        viewModel.updateTocOpen(true)
-                    }
-                },
-            )
-        },
-    ) {
-        when {
-            viewModel.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-            viewModel.errorMessage != null -> ErrorState(viewModel.errorMessage!!, onOpenDocument)
-            document == null -> EmptyState(onOpenDocument)
-            document.blocks.isEmpty() -> Text(
-                "This Markdown file is empty.",
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
-            )
-            else -> DocumentList(document, viewModel.currentMatch, listState)
-        }
+    Column(modifier.fillMaxSize()) {
         AnimatedVisibility(
             visible = viewModel.tocOpen && document != null,
             enter = slideInVertically { -it },
             exit = slideOutVertically { -it },
         ) {
-            TocOverlay(
+            TocPanel(
                 headings = viewModel.visibleHeadings,
                 selectedIndex = viewModel.selectedHeadingIndex,
                 onSelect = { onScrollTo(viewModel.selectHeading(it)) },
-                onCloseGesture = { viewModel.updateTocOpen(false) },
             )
+        }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            when {
+                viewModel.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                viewModel.errorMessage != null -> ErrorState(
+                    viewModel.errorMessage!!,
+                    onOpenDocument,
+                )
+                document == null -> EmptyState(onOpenDocument)
+                document.blocks.isEmpty() -> Text(
+                    "This Markdown file is empty.",
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                )
+                else -> DocumentList(
+                    document = document,
+                    currentMatch = viewModel.currentMatch,
+                    listState = listState,
+                    onDoubleTap = {
+                        if (viewModel.tocOpen) viewModel.updateTocOpen(false)
+                    },
+                )
+            }
         }
     }
 }
@@ -252,11 +266,14 @@ private fun DocumentList(
     document: MarkdownDocument,
     currentMatch: SearchMatch?,
     listState: LazyListState,
+    onDoubleTap: () -> Unit,
 ) {
     SelectionContainer {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = { onDoubleTap() })
+            },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         ) {
             itemsIndexed(document.blocks, key = { index, _ -> index }) { index, block ->
@@ -371,27 +388,31 @@ private fun highlightedPlainText(text: String, match: SearchMatch?): AnnotatedSt
     }
 
 @Composable
-private fun TocOverlay(
+private fun TocPanel(
     headings: List<MarkdownHeading>,
     selectedIndex: Int,
     onSelect: (MarkdownHeading) -> Unit,
-    onCloseGesture: () -> Unit,
 ) {
-    var drag by remember { mutableFloatStateOf(0f) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(selectedIndex, headings.size) {
+        if (selectedIndex !in headings.indices) return@LaunchedEffect
+        val visibleItems = listState.layoutInfo.visibleItemsInfo
+        if (visibleItems.none { it.index == selectedIndex }) {
+            listState.animateScrollToItem(selectedIndex)
+        }
+    }
     Surface(
-        modifier = Modifier.fillMaxWidth().fillMaxHeight(0.48f).pointerInput(Unit) {
-            detectVerticalDragGestures(
-                onVerticalDrag = { _, amount -> drag += amount },
-                onDragEnd = { if (drag < -80f) onCloseGesture(); drag = 0f },
-            )
-        },
+        modifier = Modifier.fillMaxWidth().fillMaxHeight(0.48f),
         tonalElevation = 8.dp,
         shadowElevation = 8.dp,
     ) {
         if (headings.isEmpty()) {
             Text("No headings at this depth", Modifier.padding(20.dp))
         } else {
-            LazyColumn(Modifier.padding(vertical = 8.dp)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.padding(vertical = 8.dp),
+            ) {
                 itemsIndexed(headings) { index, heading ->
                     val selected = index == selectedIndex
                     Text(
