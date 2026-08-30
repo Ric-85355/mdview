@@ -674,6 +674,8 @@ class Viewer:
             if self.search_input is not None:
                 self._handle_search_input(key)
                 continue
+            if key == "h" and self.return_on_escape and self.active_panel == "toc":
+                key = "\x1b"
             if is_quit_key(key):
                 return "quit"
             if self._repository_return_requested(key):
@@ -681,12 +683,12 @@ class Viewer:
             self._handle_key(key)
 
     def _repository_return_requested(self, key: int | str) -> bool:
-        """Treat H in a remote Reader's TOC exactly like its existing Esc."""
+        """Return whether the existing remote-Reader Esc action is available."""
         return (
             self.return_on_escape
             and not self.search_query
             and self.search_message is None
-            and (key == "\x1b" or (key == "H" and self.active_panel == "toc"))
+            and key == "\x1b"
         )
 
     def _layout(self) -> tuple[int, int, int]:
@@ -973,7 +975,7 @@ class Viewer:
         else:
             status = " h Contents  l Document  j/k move  Tab toggle  1/2/3 TOC  / search  Q quit "
             if self.return_on_escape:
-                status = " Esc/H repository " + status.lstrip()
+                status = " Esc/h repository " + status.lstrip()
         self._safe_add(height - 1, 0, status.ljust(width), curses.A_REVERSE)
         if self.search_input is not None:
             cursor_column = min(width - 1, display_width(status))
@@ -1100,6 +1102,8 @@ class RepositoryView:
             key = self.screen.get_wch()
             if is_quit_key(key):
                 return
+            if key == "l" and self.active_panel == "documents":
+                key = curses.KEY_ENTER
             self.message = None
             if key == "\t":
                 self.active_panel = (
@@ -1192,8 +1196,6 @@ class RepositoryView:
             self.document_top = 0
 
     def _handle_document_key(self, key: int | str) -> str | None:
-        if key == "L":
-            key = curses.KEY_ENTER
         documents = self._documents()
         last = max(0, len(documents) - 1)
         if key == curses.KEY_UP:
@@ -1296,7 +1298,7 @@ class RepositoryView:
                 width - left_width - 2,
             )
         status = self.message or (
-            "h Directories  l Documents  j/k move  Tab toggle  Enter/L open  Q quit"
+            "h Directories  l Documents/open  j/k move  Tab toggle  Enter open  Q quit"
         )
         self._safe_add(
             height - 1,

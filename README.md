@@ -67,6 +67,9 @@ You can also install it somewhere in your `PATH`, for example:
 sudo cp mdview /usr/local/bin/mdview
 ```
 
+Repeat this copy after updating the repository; `mdview` from `PATH` is a
+separate installed file and is not updated when `./mdview` changes.
+
 Then run:
 
 ```console
@@ -83,7 +86,7 @@ Repository View loads `http://ricaro.top/mdrepo/repository.json`, shows
 directories on the left and their direct documents on the right. Use `Tab`
 to switch panels, `j`/`k` or the arrow keys to select an item, and `Enter` to
 download the selected document into the existing Reader. In the document list,
-`L` opens the selected document as well. `Esc`, or `H` while the Reader TOC has
+`l` opens the selected document as well. `Esc`, or `h` while the Reader TOC has
 focus, returns from a remote document to Repository View without losing the
 current selection.
 
@@ -281,6 +284,10 @@ chmod +x mdview
 sudo cp mdview /usr/local/bin/mdview
 ```
 
+После обновления репозитория повторите копирование: команда `mdview` из
+`PATH` запускает отдельную установленную копию, которая не обновляется вместе
+с `./mdview`.
+
 После этого запуск:
 
 ```console
@@ -296,8 +303,8 @@ mdview
 Repository View загружает `http://ricaro.top/mdrepo/repository.json`, слева
 показывает каталоги, а справа — документы выбранного каталога. `Tab`
 переключает панели, `j`/`k` и стрелки выбирают элементы, `Enter` загружает
-выбранный документ в существующий Reader. В списке документов `L` также
-открывает выбранный документ. `Esc` либо `H` при активной панели оглавления
+выбранный документ в существующий Reader. В списке документов `l` также
+открывает выбранный документ. `Esc` либо `h` при активной панели оглавления
 Reader возвращает из сетевого документа в Repository View с сохранением
 текущего выбора.
 

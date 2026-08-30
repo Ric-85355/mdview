@@ -1,7 +1,7 @@
 # test_mdview.py — created 2026-08-25, version 0.3.0.
 # Purpose: regression tests for repository browsing, Markdown display, navigation, and search.
 # Algorithm: load the extensionless application module, feed deterministic
-# Markdown samples to its model and viewer, and assert state transitions.
+# model data and scripted get_wch input, and assert state transitions.
 
 """Unit tests for mdview's non-interactive document model."""
 
@@ -13,6 +13,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 APP_PATH = Path(__file__).with_name("mdview")
@@ -59,6 +60,33 @@ class FakeScreen:
     def getmaxyx(self) -> tuple[int, int]:
         """Return configured terminal dimensions."""
         return self.height, self.width
+
+
+class FakeInteractiveScreen(FakeScreen):
+    """Drive complete curses input loops without drawing a real terminal."""
+
+    def __init__(self, keys: list[int | str], height: int = 9, width: int = 80):
+        super().__init__(height, width)
+        self.keys = iter(keys)
+
+    def keypad(self, enabled: bool) -> None:
+        """Accept the keypad mode used by both application loops."""
+
+    def get_wch(self) -> int | str:
+        """Return the next scripted key through the real dispatch path."""
+        return next(self.keys)
+
+    def erase(self) -> None:
+        """Ignore screen clearing in state-only integration tests."""
+
+    def addstr(self, *args) -> None:
+        """Ignore terminal drawing while retaining the production call path."""
+
+    def refresh(self) -> None:
+        """Ignore refreshes in state-only integration tests."""
+
+    def move(self, row: int, column: int) -> None:
+        """Accept cursor movement used by the Reader."""
 
 
 class RepositoryModelTests(unittest.TestCase):
@@ -160,22 +188,35 @@ class RepositoryModelTests(unittest.TestCase):
         with self.assertRaisesRegex(mdview.RepositoryError, "unsafe path"):
             mdview.document_url("http://example.test/repo/", "../secret.md")
 
-    def test_uppercase_l_opens_selected_document_like_enter(self) -> None:
+    def test_lowercase_l_opens_selected_document_like_enter(self) -> None:
         repository = mdview.parse_repository_json(self.SOURCE)
-        view = mdview.RepositoryView(
-            FakeScreen(), "http://example.test/repo/", repository
+        opened: list[str] = []
+        for key in ("l", mdview.curses.KEY_ENTER):
+            view = mdview.RepositoryView(
+                FakeInteractiveScreen([key, "Q"]),
+                "http://example.test/repo/",
+                repository,
+            )
+            view.active_panel = "documents"
+
+            def open_document(document):
+                opened.append(document.name)
+                return "back"
+
+            view._open_document = open_document
+            with patch.object(mdview.curses, "curs_set"):
+                view.run()
+        self.assertEqual(opened, ["mikrotik", "mikrotik"])
+
+        directory_view = mdview.RepositoryView(
+            FakeInteractiveScreen(["l", "Q"]),
+            "http://example.test/repo/",
+            repository,
         )
-        opened: list[mdview.RepositoryDocument] = []
-
-        def open_document(document):
-            opened.append(document)
-            return "back"
-
-        view._open_document = open_document
-        uppercase_result = view._handle_document_key("L")
-        enter_result = view._handle_document_key(mdview.curses.KEY_ENTER)
-        self.assertEqual(uppercase_result, enter_result)
-        self.assertEqual([document.name for document in opened], ["mikrotik"] * 2)
+        directory_view._open_document = open_document
+        with patch.object(mdview.curses, "curs_set"):
+            directory_view.run()
+        self.assertEqual(opened, ["mikrotik", "mikrotik"])
 
 
 class MarkdownModelTests(unittest.TestCase):
@@ -444,19 +485,30 @@ class NavigationStateTests(unittest.TestCase):
         self.assertEqual(viewer.document_top, 3)
         self.assertEqual(viewer.toc_selected, 4)
 
-    def test_uppercase_h_returns_from_remote_reader_toc_like_escape(self) -> None:
-        viewer = self._viewer()
-        viewer.return_on_escape = True
-        viewer.active_panel = "toc"
-        self.assertEqual(
-            viewer._repository_return_requested("H"),
-            viewer._repository_return_requested("\x1b"),
-        )
-        viewer.active_panel = "document"
-        self.assertFalse(viewer._repository_return_requested("H"))
-        viewer.active_panel = "toc"
-        viewer.return_on_escape = False
-        self.assertFalse(viewer._repository_return_requested("H"))
+    def test_lowercase_h_returns_from_remote_reader_toc_like_escape(self) -> None:
+        outcomes: list[str] = []
+        for key in ("h", "\x1b"):
+            viewer = mdview.Viewer(
+                FakeInteractiveScreen([key]),
+                Path("remote.md"),
+                ["# Remote"],
+                return_on_escape=True,
+            )
+            viewer.active_panel = "toc"
+            with patch.object(mdview.curses, "curs_set"):
+                outcomes.append(viewer.run())
+        self.assertEqual(outcomes, ["back", "back"])
+
+        for return_on_escape, active_panel in ((True, "document"), (False, "toc")):
+            viewer = mdview.Viewer(
+                FakeInteractiveScreen(["h", "Q"]),
+                Path("sample.md"),
+                ["# Sample"],
+                return_on_escape=return_on_escape,
+            )
+            viewer.active_panel = active_panel
+            with patch.object(mdview.curses, "curs_set"):
+                self.assertEqual(viewer.run(), "quit")
 
     def test_l_activates_document_at_selected_heading(self) -> None:
         viewer = self._viewer()
