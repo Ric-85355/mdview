@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # mdview — created 2026-08-25, version 0.3.0.
-# Purpose: browse one HTTP repository and read Markdown in a two-pane curses UI.
-# Algorithm: validate repository metadata or parse local source lines, then use
-# the existing mapped Reader for rendering, navigation, resize, and search.
+# Purpose: configure and browse HTTP repositories, save files, and read Markdown.
+# Algorithm: validate XDG settings and repository metadata or local source, then
+# use repository actions and the mapped curses Reader for navigation and search.
 
 """A small, read-only Markdown viewer for UTF-8 Linux terminals."""
 
@@ -13,6 +13,7 @@ import curses
 import json
 import locale
 import logging
+import os
 import re
 import sys
 import textwrap
@@ -26,7 +27,6 @@ from urllib.request import Request, urlopen
 
 
 VERSION = "0.3.0"
-REPOSITORY_URL = "http://ricaro.top/mdrepo/"
 HTTP_TIMEOUT_SECONDS = 10
 MIN_TERMINAL_HEIGHT = 8
 MIN_TERMINAL_WIDTH = 40
@@ -96,10 +96,233 @@ class Repository:
 
     name: str
     directories: tuple[RepositoryDirectory, ...]
+    documents: tuple[RepositoryDocument, ...] = ()
+
+
+@dataclass(frozen=True)
+class AdminSettings:
+    """Non-secret connection metadata reserved for future admin access."""
+
+    enabled: bool
+    sftp_host: str | None = None
+    sftp_port: int | None = None
+    sftp_user: str | None = None
+    sftp_root: str | None = None
+    auth_method: str | None = None
+
+
+@dataclass(frozen=True)
+class RepositorySettings:
+    """Persistent settings for one repository identified by a stable ID."""
+
+    id: str
+    name: str
+    url: str
+    download_dir: str | None
+    admin: AdminSettings
+
+
+@dataclass(frozen=True)
+class AppSettings:
+    """Settings shared by all configured repositories."""
+
+    default_download_dir: str | None
+
+
+@dataclass(frozen=True)
+class Settings:
+    """Versioned cross-platform logical settings model."""
+
+    format: int
+    app: AppSettings
+    repositories: tuple[RepositorySettings, ...]
 
 
 class RepositoryError(ValueError):
     """Report an invalid or unavailable remote repository without a traceback."""
+
+
+class ConfigError(ValueError):
+    """Report invalid or inaccessible settings without a traceback."""
+
+
+def config_path(
+    environment: dict[str, str] | None = None, home: Path | None = None
+) -> Path:
+    """Return the Linux config path following XDG_CONFIG_HOME."""
+    values = os.environ if environment is None else environment
+    xdg_home = values.get("XDG_CONFIG_HOME")
+    base = Path(xdg_home).expanduser() if xdg_home else (home or Path.home()) / ".config"
+    return base / "mdview" / "config.json"
+
+
+def default_settings() -> Settings:
+    """Return the temporary first-run configuration for the test repository."""
+    return Settings(
+        format=1,
+        app=AppSettings(default_download_dir=None),
+        repositories=(
+            RepositorySettings(
+                id="test",
+                name="Test Repository",
+                url="http://ricaro.top/mdrepo/",
+                download_dir=None,
+                admin=AdminSettings(enabled=False),
+            ),
+        ),
+    )
+
+
+def _optional_string(value: Any, field: str) -> str | None:
+    """Validate one nullable non-empty string setting."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{field} must be a non-empty string or null")
+    return value
+
+
+def _settings_required_string(item: dict[str, Any], field: str, context: str) -> str:
+    """Return one required non-empty string from a settings object."""
+    value = item.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{context} has no valid {field}")
+    return value.strip()
+
+
+def _parse_admin_settings(raw: Any, context: str) -> AdminSettings:
+    """Validate non-secret future SFTP metadata without using it."""
+    if raw is None:
+        raw = {"enabled": False}
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{context}.admin must be an object")
+    forbidden = {"password", "private_key", "passphrase", "token"}.intersection(raw)
+    if forbidden:
+        raise ConfigError("secrets must not be stored in config.json")
+    enabled = raw.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ConfigError(f"{context}.admin.enabled must be boolean")
+    port = raw.get("sftp_port")
+    if port is not None and (isinstance(port, bool) or not isinstance(port, int)):
+        raise ConfigError(f"{context}.admin.sftp_port must be an integer or null")
+    return AdminSettings(
+        enabled=enabled,
+        sftp_host=_optional_string(raw.get("sftp_host"), f"{context}.admin.sftp_host"),
+        sftp_port=port,
+        sftp_user=_optional_string(raw.get("sftp_user"), f"{context}.admin.sftp_user"),
+        sftp_root=_optional_string(raw.get("sftp_root"), f"{context}.admin.sftp_root"),
+        auth_method=_optional_string(
+            raw.get("auth_method"), f"{context}.admin.auth_method"
+        ),
+    )
+
+
+def parse_settings_json(source: str) -> Settings:
+    """Parse and validate format-1 mdview settings."""
+    try:
+        raw = json.loads(source)
+    except json.JSONDecodeError as error:
+        raise ConfigError(f"invalid config JSON: {error.msg}") from error
+    if not isinstance(raw, dict):
+        raise ConfigError("config must be an object")
+    if raw.get("format") != 1:
+        raise ConfigError("unsupported config format")
+    raw_app = raw.get("app")
+    if not isinstance(raw_app, dict):
+        raise ConfigError("config app must be an object")
+    app = AppSettings(
+        default_download_dir=_optional_string(
+            raw_app.get("default_download_dir"), "app.default_download_dir"
+        )
+    )
+    raw_repositories = raw.get("repositories")
+    if not isinstance(raw_repositories, list) or not raw_repositories:
+        raise ConfigError("config repositories must be a non-empty list")
+    repositories: list[RepositorySettings] = []
+    identifiers: set[str] = set()
+    for index, raw_repository in enumerate(raw_repositories):
+        context = f"repository {index}"
+        if not isinstance(raw_repository, dict):
+            raise ConfigError(f"{context} must be an object")
+        identifier = _settings_required_string(raw_repository, "id", context)
+        if identifier in identifiers:
+            raise ConfigError(f"duplicate repository id: {identifier}")
+        identifiers.add(identifier)
+        url = _settings_required_string(raw_repository, "url", context)
+        url_parts = urlsplit(url)
+        if url_parts.scheme not in {"http", "https"} or not url_parts.netloc:
+            raise ConfigError(f"{context} has an invalid URL")
+        repositories.append(
+            RepositorySettings(
+                id=identifier,
+                name=_settings_required_string(raw_repository, "name", context),
+                url=url.rstrip("/") + "/",
+                download_dir=_optional_string(
+                    raw_repository.get("download_dir"), f"{context}.download_dir"
+                ),
+                admin=_parse_admin_settings(raw_repository.get("admin"), context),
+            )
+        )
+    return Settings(1, app, tuple(repositories))
+
+
+def settings_json(settings: Settings) -> str:
+    """Serialize supported settings without any secret fields."""
+    data = {
+        "format": settings.format,
+        "app": {"default_download_dir": settings.app.default_download_dir},
+        "repositories": [
+            {
+                "id": repository.id,
+                "name": repository.name,
+                "url": repository.url,
+                "download_dir": repository.download_dir,
+                "admin": {
+                    "enabled": repository.admin.enabled,
+                    "sftp_host": repository.admin.sftp_host,
+                    "sftp_port": repository.admin.sftp_port,
+                    "sftp_user": repository.admin.sftp_user,
+                    "sftp_root": repository.admin.sftp_root,
+                    "auth_method": repository.admin.auth_method,
+                },
+            }
+            for repository in settings.repositories
+        ],
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+
+
+def save_settings(settings: Settings, path: Path | None = None) -> Path:
+    """Create parent directories and save one UTF-8 config file."""
+    destination = path or config_path()
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(settings_json(settings), encoding="utf-8")
+    except OSError as error:
+        raise ConfigError(f"could not save config {destination}: {error}") from error
+    return destination
+
+
+def load_settings(path: Path | None = None) -> Settings:
+    """Load settings, creating the documented first-run defaults if absent."""
+    source_path = path or config_path()
+    if not source_path.exists():
+        settings = default_settings()
+        save_settings(settings, source_path)
+        return settings
+    try:
+        source = source_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise ConfigError(f"could not read config {source_path}: {error}") from error
+    return parse_settings_json(source)
+
+
+def download_directory(
+    app: AppSettings, repository: RepositorySettings
+) -> Path | None:
+    """Resolve the repository override before the global download directory."""
+    value = repository.download_dir or app.default_download_dir
+    return Path(value).expanduser() if value is not None else None
 
 
 def _required_string(item: dict[str, Any], field: str, context: str) -> str:
@@ -164,8 +387,8 @@ def parse_repository_json(source: str) -> Repository:
     if raw.get("format") != 1:
         raise RepositoryError("unsupported repository format")
     name = _required_string(raw, "name", "repository")
-    directories, _root_documents = _parse_repository_items(raw.get("items"), ())
-    return Repository(name, directories)
+    directories, root_documents = _parse_repository_items(raw.get("items"), ())
+    return Repository(name, directories, root_documents)
 
 
 def repository_directories(
@@ -181,6 +404,34 @@ def repository_directories(
 
     visit(repository.directories, 0)
     return result
+
+
+def repository_documents(repository: Repository) -> list[RepositoryDocument]:
+    """Return every document in stable repository-tree order."""
+    result = list(repository.documents)
+
+    def visit(directories: tuple[RepositoryDirectory, ...]) -> None:
+        for directory in directories:
+            result.extend(directory.documents)
+            visit(directory.directories)
+
+    visit(repository.directories)
+    return result
+
+
+def search_repository_documents(
+    repository: Repository, query: str
+) -> list[RepositoryDocument]:
+    """Find documents by display name or relative path, ignoring case."""
+    normalized_query = query.casefold()
+    if not normalized_query:
+        return []
+    return [
+        document
+        for document in repository_documents(repository)
+        if normalized_query in document.name.casefold()
+        or normalized_query in document.path.casefold()
+    ]
 
 
 def document_url(repository_url: str, document_path: str) -> str:
@@ -218,6 +469,21 @@ def fetch_utf8(url: str) -> str:
 def load_repository(repository_url: str) -> Repository:
     """Download and parse repository.json for one repository root URL."""
     return parse_repository_json(fetch_utf8(urljoin(repository_url, "repository.json")))
+
+
+def save_repository_document(
+    repository_url: str,
+    document: RepositoryDocument,
+    destination: Path,
+    overwrite: bool = False,
+) -> None:
+    """Download one document and save its original UTF-8 text locally."""
+    if destination.exists() and not overwrite:
+        raise FileExistsError(destination)
+    source = fetch_utf8(document_url(repository_url, document.path))
+    mode = "w" if overwrite else "x"
+    with destination.open(mode, encoding="utf-8", newline="") as output:
+        output.write(source)
 
 
 def parse_headings(lines: list[str]) -> list[Heading]:
@@ -1078,11 +1344,14 @@ class RepositoryView:
     def __init__(
         self,
         screen: curses.window,
-        repository_url: str,
+        app_settings: AppSettings,
+        repository_settings: RepositorySettings,
         repository: Repository,
     ):
         self.screen = screen
-        self.repository_url = repository_url
+        self.app_settings = app_settings
+        self.repository_settings = repository_settings
+        self.repository_url = repository_settings.url
         self.repository = repository
         self.directory_rows = repository_directories(repository)
         self.directory_selected = 0
@@ -1091,6 +1360,15 @@ class RepositoryView:
         self.document_top = 0
         self.active_panel = "directories"
         self.message: str | None = None
+        self.search_input: str | None = None
+        self.search_query = ""
+        self.search_results: list[RepositoryDocument] = []
+        self.search_selected = 0
+        self.search_saved_document_top: int | None = None
+        self.search_saved_active_panel: str | None = None
+        self.save_input: str | None = None
+        self.save_document: RepositoryDocument | None = None
+        self.overwrite_destination: Path | None = None
 
     def run(self) -> None:
         """Run Repository View until Q or a nested Reader requests exit."""
@@ -1100,13 +1378,28 @@ class RepositoryView:
             self._clamp_selection()
             self._draw()
             key = self.screen.get_wch()
+            if self.search_input is not None:
+                self._handle_search_input(key)
+                continue
+            if self.save_input is not None:
+                self._handle_save_input(key)
+                continue
+            if self.overwrite_destination is not None:
+                self._handle_overwrite_confirmation(key)
+                continue
             if is_quit_key(key):
                 return
             if key == "l" and self.active_panel == "documents":
                 key = curses.KEY_ENTER
             self.message = None
-            if key == "r":
+            if key == "\x1b" and self.search_query:
+                self._clear_search()
+            elif key == "/":
+                self.search_input = ""
+            elif key == "r":
                 self._refresh_repository()
+            elif key == "d" and self.active_panel == "documents":
+                self._start_save()
             elif key == "\t":
                 self.active_panel = (
                     "documents"
@@ -1142,9 +1435,125 @@ class RepositoryView:
             return None
         return self.directory_rows[self.directory_selected][0]
 
-    def _documents(self) -> tuple[RepositoryDocument, ...]:
+    def _directory_documents(self) -> tuple[RepositoryDocument, ...]:
         directory = self._selected_directory()
         return directory.documents if directory is not None else ()
+
+    def _documents(self) -> tuple[RepositoryDocument, ...]:
+        if self.search_query:
+            return tuple(self.search_results)
+        return self._directory_documents()
+
+    def _handle_search_input(self, key: int | str) -> None:
+        """Edit and submit a Repository View search query."""
+        if key == "\x1b":
+            self.search_input = None
+        elif key in (curses.KEY_ENTER, "\n", "\r"):
+            query = self.search_input or ""
+            self.search_input = None
+            if query:
+                self._perform_search(query)
+            else:
+                self._clear_search()
+        elif key in (curses.KEY_BACKSPACE, "\b", "\x7f"):
+            self.search_input = (self.search_input or "")[:-1]
+        elif isinstance(key, str) and key.isprintable():
+            self.search_input = (self.search_input or "") + key
+
+    def _perform_search(self, query: str) -> None:
+        """Replace the right panel with matches from the current index."""
+        if not self.search_query:
+            self.search_saved_document_top = self.document_top
+            self.search_saved_active_panel = self.active_panel
+        self.search_query = query
+        self.search_results = search_repository_documents(self.repository, query)
+        self.search_selected = 0
+        self.document_top = 0
+        self.active_panel = "documents"
+
+    def _clear_search(self) -> None:
+        """Return to directory browsing and restore its prior viewport."""
+        self.search_input = None
+        self.search_query = ""
+        self.search_results = []
+        self.search_selected = 0
+        if self.search_saved_document_top is not None:
+            self.document_top = self.search_saved_document_top
+        if self.search_saved_active_panel is not None:
+            self.active_panel = self.search_saved_active_panel
+        self.search_saved_document_top = None
+        self.search_saved_active_panel = None
+        self._clamp_selection()
+
+    def _start_save(self) -> None:
+        """Prompt for a destination for the currently selected document."""
+        documents = self._documents()
+        selected = (
+            self.search_selected if self.search_query else self.document_selected
+        )
+        if not documents:
+            self.message = "No document selected"
+            return
+        self.save_document = documents[selected]
+        filename = Path(self.save_document.path).name
+        directory = download_directory(
+            self.app_settings, self.repository_settings
+        )
+        self.save_input = str(directory / filename) if directory is not None else filename
+
+    def _handle_save_input(self, key: int | str) -> None:
+        """Edit and submit the local destination path."""
+        if key == "\x1b":
+            self.save_input = None
+            self.save_document = None
+        elif key in (curses.KEY_ENTER, "\n", "\r"):
+            destination_text = self.save_input or ""
+            self.save_input = None
+            if not destination_text:
+                self.save_document = None
+                self.message = "Save cancelled: empty path"
+                return
+            destination = Path(destination_text).expanduser()
+            self._save_to(destination)
+        elif key in (curses.KEY_BACKSPACE, "\b", "\x7f"):
+            self.save_input = (self.save_input or "")[:-1]
+        elif isinstance(key, str) and key.isprintable():
+            self.save_input = (self.save_input or "") + key
+
+    def _save_to(self, destination: Path, overwrite: bool = False) -> None:
+        """Save the pending document while keeping all failures inside the view."""
+        if self.save_document is None:
+            return
+        try:
+            save_repository_document(
+                self.repository_url,
+                self.save_document,
+                destination,
+                overwrite=overwrite,
+            )
+        except FileExistsError:
+            self.overwrite_destination = destination
+            return
+        except RepositoryError as error:
+            self.message = f"Download failed: {error}"
+        except OSError as error:
+            self.message = f"Save failed: {error}"
+        else:
+            self.message = f"Saved: {destination}"
+        self.save_document = None
+        self.overwrite_destination = None
+
+    def _handle_overwrite_confirmation(self, key: int | str) -> None:
+        """Require an explicit y before replacing an existing local file."""
+        destination = self.overwrite_destination
+        if destination is None:
+            return
+        if key in ("y", "Y"):
+            self._save_to(destination, overwrite=True)
+        else:
+            self.overwrite_destination = None
+            self.save_document = None
+            self.message = "Save cancelled"
 
     def _refresh_repository(self) -> None:
         """Reload the index atomically and retain selections by stable paths."""
@@ -1152,7 +1561,7 @@ class RepositoryView:
         selected_directory_path = (
             selected_directory.path if selected_directory is not None else None
         )
-        documents = self._documents()
+        documents = self._directory_documents()
         selected_document_path = (
             documents[self.document_selected].path if documents else None
         )
@@ -1183,7 +1592,7 @@ class RepositoryView:
         else:
             self.directory_selected = matching_directory
 
-        updated_documents = self._documents()
+        updated_documents = self._directory_documents()
         matching_document = next(
             (
                 index
@@ -1198,6 +1607,29 @@ class RepositoryView:
             )
         else:
             self.document_selected = matching_document
+        if self.search_query:
+            selected_result_path = (
+                self.search_results[self.search_selected].path
+                if self.search_results
+                else None
+            )
+            old_search_index = self.search_selected
+            self.search_results = search_repository_documents(
+                updated_repository, self.search_query
+            )
+            matching_result = next(
+                (
+                    index
+                    for index, document in enumerate(self.search_results)
+                    if document.path == selected_result_path
+                ),
+                None,
+            )
+            self.search_selected = (
+                min(old_search_index, max(0, len(self.search_results) - 1))
+                if matching_result is None
+                else matching_result
+            )
         self._clamp_selection()
         self.message = "Repository refreshed"
 
@@ -1207,9 +1639,16 @@ class RepositoryView:
         self.directory_selected = min(
             self.directory_selected, max(0, len(self.directory_rows) - 1)
         )
-        documents = self._documents()
+        directory_documents = self._directory_documents()
         self.document_selected = min(
-            self.document_selected, max(0, len(documents) - 1)
+            self.document_selected, max(0, len(directory_documents) - 1)
+        )
+        documents = self._documents()
+        self.search_selected = min(
+            self.search_selected, max(0, len(self.search_results) - 1)
+        )
+        selected_document = (
+            self.search_selected if self.search_query else self.document_selected
         )
         self.directory_top = self._visible_top(
             self.directory_top,
@@ -1219,7 +1658,7 @@ class RepositoryView:
         )
         self.document_top = self._visible_top(
             self.document_top,
-            self.document_selected,
+            selected_document,
             len(documents),
             visible_height,
         )
@@ -1255,16 +1694,23 @@ class RepositoryView:
     def _handle_document_key(self, key: int | str) -> str | None:
         documents = self._documents()
         last = max(0, len(documents) - 1)
+        selected = (
+            self.search_selected if self.search_query else self.document_selected
+        )
         if key == curses.KEY_UP:
-            self.document_selected = max(0, self.document_selected - 1)
+            selected = max(0, selected - 1)
         elif key == curses.KEY_DOWN:
-            self.document_selected = min(last, self.document_selected + 1)
+            selected = min(last, selected + 1)
         elif key == curses.KEY_HOME:
-            self.document_selected = 0
+            selected = 0
         elif key == curses.KEY_END:
-            self.document_selected = last
+            selected = last
         elif key in (curses.KEY_ENTER, "\n", "\r") and documents:
-            return self._open_document(documents[self.document_selected])
+            return self._open_document(documents[selected])
+        if self.search_query:
+            self.search_selected = selected
+        else:
+            self.document_selected = selected
         return None
 
     def _open_document(self, document: RepositoryDocument) -> str | None:
@@ -1311,7 +1757,11 @@ class RepositoryView:
         self._safe_add(
             0,
             left_width + 2,
-            f" Repository: {self.repository.name} ",
+            (
+                " Search results "
+                if self.search_query
+                else f" Repository: {self.repository_settings.name} "
+            ),
             curses.A_BOLD,
             width - left_width - 3,
         )
@@ -1337,26 +1787,51 @@ class RepositoryView:
                 left_width - 2,
             )
         documents = self._documents()
+        selected_document = (
+            self.search_selected if self.search_query else self.document_selected
+        )
         for row, document in enumerate(
             documents[self.document_top : self.document_top + visible_height], 1
         ):
             index = self.document_top + row - 1
-            marker = "> " if index == self.document_selected else "  "
+            marker = "> " if index == selected_document else "  "
             attribute = (
                 curses.A_REVERSE
-                if index == self.document_selected
+                if index == selected_document
                 else curses.A_NORMAL
             )
             self._safe_add(
                 row,
                 left_width + 1,
-                marker + document.name,
+                marker
+                + (
+                    f"{document.name}  {document.path}"
+                    if self.search_query
+                    else document.name
+                ),
                 attribute,
                 width - left_width - 2,
             )
-        status = self.message or (
-            "h Directories  l Documents/open  j/k move  r Refresh  Enter open  Q quit"
-        )
+        if self.search_input is not None:
+            status = f"Search: {self.search_input}"
+        elif self.save_input is not None:
+            status = f"Save as: {self.save_input}  Enter save  Esc cancel"
+        elif self.overwrite_destination is not None:
+            status = f"File exists: {self.overwrite_destination}  Overwrite? y/N"
+        elif self.message:
+            status = self.message
+        elif self.search_query:
+            status = (
+                f"{len(self.search_results)} matches: {self.search_query}  "
+                "Esc results  / new search  Enter open"
+                if self.search_results
+                else f"No matches: {self.search_query}  Esc results  / new search"
+            )
+        else:
+            status = (
+                "h Directories  l Documents/open  j/k move  / Search  "
+                "r Refresh  d Save  Enter open  Q quit"
+            )
         self._safe_add(
             height - 1,
             0,
@@ -1415,7 +1890,7 @@ class RepositoryView:
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="View a local Markdown file or browse the test repository"
+        description="View a local Markdown file or browse a configured repository"
     )
     parser.add_argument(
         "file",
@@ -1432,6 +1907,8 @@ def main(arguments: list[str] | None = None) -> int:
     args = parse_args(arguments)
     source_lines: list[str] | None = None
     repository: Repository | None = None
+    app_settings: AppSettings | None = None
+    repository_settings: RepositorySettings | None = None
     if args.file is not None:
         try:
             source_lines = read_markdown(args.file)
@@ -1440,7 +1917,13 @@ def main(arguments: list[str] | None = None) -> int:
             return 1
     else:
         try:
-            repository = load_repository(REPOSITORY_URL)
+            settings = load_settings()
+            app_settings = settings.app
+            repository_settings = settings.repositories[0]
+            repository = load_repository(repository_settings.url)
+        except ConfigError as error:
+            print(f"mdview: config error: {error}", file=sys.stderr)
+            return 1
         except RepositoryError as error:
             print(f"mdview: repository error: {error}", file=sys.stderr)
             return 1
@@ -1449,10 +1932,14 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         if args.file is not None and source_lines is not None:
             curses.wrapper(lambda screen: Viewer(screen, args.file, source_lines).run())
-        elif repository is not None:
+        elif (
+            repository is not None
+            and app_settings is not None
+            and repository_settings is not None
+        ):
             curses.wrapper(
                 lambda screen: RepositoryView(
-                    screen, REPOSITORY_URL, repository
+                    screen, app_settings, repository_settings, repository
                 ).run()
             )
     except KeyboardInterrupt:

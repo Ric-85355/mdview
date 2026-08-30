@@ -76,13 +76,13 @@ Then run:
 mdview filename.md
 ```
 
-Run without a file to browse the first read-only test repository:
+Run without a file to browse the first configured repository:
 
 ```console
 mdview
 ```
 
-Repository View loads `http://ricaro.top/mdrepo/repository.json`, shows
+Repository View loads the first entry from the settings file, shows
 directories on the left and their direct documents on the right. Use `Tab`
 to switch panels, `j`/`k` or the arrow keys to select an item, and `Enter` to
 download the selected document into the existing Reader. In the document list,
@@ -90,6 +90,46 @@ download the selected document into the existing Reader. In the document list,
 focus, returns from a remote document to Repository View without losing the
 current selection. Press `r` in Repository View to request `repository.json`
 again and refresh the directory/document lists without restarting mdview.
+Press `/`, type a query, and press `Enter` to search the current repository by
+document name or relative path. Results appear in the document panel; `Enter`
+or `l` opens the selected result, while `Esc` returns to directory browsing.
+This search is case-insensitive and does not inspect Markdown contents.
+With a document selected in the right panel, press `d` to save its original
+UTF-8 Markdown source locally. The prompt starts with the source filename; edit
+it to choose another path. Existing files require an explicit `y` confirmation
+and a download never opens another Reader automatically.
+
+### Python Settings
+
+The Python client stores format-1 JSON settings in
+`~/.config/mdview/config.json`, or `$XDG_CONFIG_HOME/mdview/config.json` when
+`XDG_CONFIG_HOME` is set. On the first repository-mode launch it creates the
+file with the temporary `http://ricaro.top/mdrepo/` test repository. Direct
+local-file launches do not read or create this configuration.
+
+```json
+{
+  "format": 1,
+  "app": {"default_download_dir": "/home/user/Downloads"},
+  "repositories": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "url": "https://example.com/mdrepo/",
+      "download_dir": null,
+      "admin": {"enabled": false}
+    }
+  ]
+}
+```
+
+The array may contain multiple repositories, although the current TUI opens
+only its first entry. A repository `download_dir` overrides the global
+`app.default_download_dir`; if neither is set, the save prompt starts with only
+the document filename. The local `name` is the user-facing alias, while the
+name in `repository.json` remains server metadata. Admin/SFTP fields are parsed
+and preserved for the future, but no SFTP connection or Settings UI exists yet.
+Passwords, private keys, passphrases, and tokens must not be stored in this file.
 
 ### Dynamic Repository Server
 
@@ -152,7 +192,7 @@ The following features are not currently supported:
 * images;
 * mouse input;
 * themes;
-* configuration files;
+* Settings UI;
 * plugins;
 * multiple open documents;
 * full Markdown rendering.
@@ -302,13 +342,13 @@ sudo cp mdview /usr/local/bin/mdview
 mdview filename.md
 ```
 
-Запуск без имени файла открывает первый read-only тестовый репозиторий:
+Запуск без имени файла открывает первый настроенный репозиторий:
 
 ```console
 mdview
 ```
 
-Repository View загружает `http://ricaro.top/mdrepo/repository.json`, слева
+Repository View загружает первую запись из конфигурации, слева
 показывает каталоги, а справа — документы выбранного каталога. `Tab`
 переключает панели, `j`/`k` и стрелки выбирают элементы, `Enter` загружает
 выбранный документ в существующий Reader. В списке документов `l` также
@@ -316,6 +356,29 @@ Repository View загружает `http://ricaro.top/mdrepo/repository.json`, �
 Reader возвращает из сетевого документа в Repository View с сохранением
 текущего выбора. Клавиша `r` в Repository View повторно запрашивает
 `repository.json` и обновляет каталоги и документы без перезапуска mdview.
+Клавиша `/` открывает поиск по имени документа и его относительному
+пути в текущем репозитории. `Enter` или `l` открывает выбранный результат,
+а `Esc` возвращает к дереву каталогов. Поиск регистронезависимый и не читает
+содержимое Markdown-файлов.
+При выбранном документе в правой панели `d` сохраняет его исходный UTF-8
+Markdown в локальный файл. В поле сразу предложено исходное имя; путь можно
+изменить. Замена существующего файла требует явного подтверждения `y`; после
+скачивания Reader автоматически не открывается.
+
+### Настройки Python-версии
+
+Конфигурация формата 1 хранится в `~/.config/mdview/config.json` или в
+`$XDG_CONFIG_HOME/mdview/config.json`, если задан `XDG_CONFIG_HOME`. При первом
+сетевом запуске файл создаётся автоматически с временным тестовым репозиторием
+`http://ricaro.top/mdrepo/`. Запуск локального файла конфигурацию не читает и не создаёт.
+
+Формат JSON совпадает с приведённым выше английским примером. Массив `repositories`
+уже поддерживает несколько записей, но TUI пока открывает только первую. Поле
+репозитория `download_dir` имеет приоритет над `app.default_download_dir`; если оба пути
+не заданы, диалог предлагает только имя файла. Локальное `name` считается alias,
+а серверное имя остаётся метаданными. Admin/SFTP-поля загружаются и сохраняются, но
+SFTP и Settings UI ещё не реализованы. Пароли, приватные ключи, passphrase и токены в файле
+запрещены.
 
 ### Динамический сервер репозитория
 
@@ -378,7 +441,7 @@ Task lists, смешанные списки и сложные вложенные
 * изображения;
 * мышь;
 * темы;
-* конфигурационные файлы;
+* Settings UI;
 * плагины;
 * несколько открытых документов;
 * полноценный Markdown-рендеринг.

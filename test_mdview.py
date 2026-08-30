@@ -1,5 +1,5 @@
 # test_mdview.py — created 2026-08-25, version 0.3.0.
-# Purpose: regression tests for repository browsing, Markdown display, navigation, and search.
+# Purpose: test settings, repository actions, Markdown display, navigation, and search.
 # Algorithm: load the extensionless application module, feed deterministic
 # model data and scripted get_wch input, and assert state transitions.
 
@@ -11,6 +11,7 @@ import importlib.machinery
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -33,6 +34,20 @@ def _load_application():
 mdview = _load_application()
 
 
+def test_repository_settings(download_dir=None):
+    """Return deterministic Repository View settings for unit tests."""
+    return mdview.RepositorySettings(
+        id="test",
+        name="Test Repository",
+        url="http://example.test/repo/",
+        download_dir=download_dir,
+        admin=mdview.AdminSettings(enabled=False),
+    )
+
+
+TEST_APP_SETTINGS = mdview.AppSettings(default_download_dir=None)
+
+
 class CliTests(unittest.TestCase):
     """Verify release metadata exposed by the Python command line."""
 
@@ -48,6 +63,157 @@ class CliTests(unittest.TestCase):
     def test_local_file_is_optional(self) -> None:
         self.assertIsNone(mdview.parse_args([]).file)
         self.assertEqual(mdview.parse_args(["sample.md"]).file, Path("sample.md"))
+
+
+class SettingsTests(unittest.TestCase):
+    """Verify XDG persistence and the shared format-1 settings model."""
+
+    @staticmethod
+    def _source(repositories=None, default_download_dir=None) -> str:
+        data = {
+            "format": 1,
+            "app": {"default_download_dir": default_download_dir},
+            "repositories": repositories
+            or [
+                {
+                    "id": "personal",
+                    "name": "Personal",
+                    "url": "https://example.test/docs/",
+                    "download_dir": None,
+                    "admin": {"enabled": False},
+                }
+            ],
+        }
+        return mdview.json.dumps(data)
+
+    def test_config_path_uses_xdg_or_home_fallback(self) -> None:
+        self.assertEqual(
+            mdview.config_path({"XDG_CONFIG_HOME": "/tmp/xdg"}, Path("/home/u")),
+            Path("/tmp/xdg/mdview/config.json"),
+        )
+        self.assertEqual(
+            mdview.config_path({}, Path("/home/u")),
+            Path("/home/u/.config/mdview/config.json"),
+        )
+
+    def test_default_settings_use_temporary_test_repository(self) -> None:
+        settings = mdview.default_settings()
+        self.assertEqual(settings.format, 1)
+        self.assertIsNone(settings.app.default_download_dir)
+        self.assertEqual(settings.repositories[0].id, "test")
+        self.assertEqual(
+            settings.repositories[0].url, "http://ricaro.top/mdrepo/"
+        )
+
+    def test_missing_config_is_created_and_loaded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mdview" / "config.json"
+            settings = mdview.load_settings(path)
+            self.assertTrue(path.is_file())
+            self.assertEqual(mdview.parse_settings_json(path.read_text()), settings)
+
+    def test_loads_valid_config_and_multiple_repositories(self) -> None:
+        repositories = [
+            {
+                "id": "one",
+                "name": "One",
+                "url": "https://one.example/docs",
+                "download_dir": None,
+                "admin": {"enabled": False},
+            },
+            {
+                "id": "two",
+                "name": "Two",
+                "url": "http://two.example/repo/",
+                "download_dir": "/tmp/two",
+                "admin": {"enabled": False},
+            },
+        ]
+        settings = mdview.parse_settings_json(self._source(repositories))
+        self.assertEqual([item.id for item in settings.repositories], ["one", "two"])
+        self.assertEqual(settings.repositories[0].url, "https://one.example/docs/")
+
+    def test_rejects_unsupported_format_and_broken_json(self) -> None:
+        with self.assertRaisesRegex(mdview.ConfigError, "unsupported config format"):
+            mdview.parse_settings_json('{"format": 2}')
+        with self.assertRaisesRegex(mdview.ConfigError, "invalid config JSON"):
+            mdview.parse_settings_json("{broken")
+
+    def test_rejects_missing_required_repository_fields(self) -> None:
+        repository = {
+            "name": "Missing ID",
+            "url": "https://example.test/",
+            "admin": {"enabled": False},
+        }
+        with self.assertRaisesRegex(mdview.ConfigError, "valid id"):
+            mdview.parse_settings_json(self._source([repository]))
+
+    def test_download_directory_override_fallback_and_absence(self) -> None:
+        global_app = mdview.AppSettings("/global")
+        self.assertEqual(
+            mdview.download_directory(
+                global_app, test_repository_settings("/repository")
+            ),
+            Path("/repository"),
+        )
+        self.assertEqual(
+            mdview.download_directory(global_app, test_repository_settings()),
+            Path("/global"),
+        )
+        self.assertIsNone(
+            mdview.download_directory(TEST_APP_SETTINGS, test_repository_settings())
+        )
+
+    def test_admin_settings_round_trip_without_secrets(self) -> None:
+        repository = {
+            "id": "admin",
+            "name": "Admin",
+            "url": "https://example.test/repo/",
+            "download_dir": None,
+            "admin": {
+                "enabled": True,
+                "sftp_host": "sftp.example.test",
+                "sftp_port": 2222,
+                "sftp_user": "user",
+                "sftp_root": "/docs",
+                "auth_method": "key",
+            },
+        }
+        settings = mdview.parse_settings_json(self._source([repository]))
+        restored = mdview.parse_settings_json(mdview.settings_json(settings))
+        self.assertEqual(restored, settings)
+        self.assertNotIn("password", mdview.settings_json(settings))
+
+    def test_rejects_secret_fields(self) -> None:
+        repository = {
+            "id": "unsafe",
+            "name": "Unsafe",
+            "url": "https://example.test/repo/",
+            "download_dir": None,
+            "admin": {"enabled": True, "password": "secret"},
+        }
+        with self.assertRaisesRegex(mdview.ConfigError, "secrets"):
+            mdview.parse_settings_json(self._source([repository]))
+
+    def test_repository_mode_uses_first_configured_url(self) -> None:
+        settings = mdview.parse_settings_json(self._source())
+        repository = mdview.Repository("Server name", (), ())
+        with patch.object(mdview, "load_settings", return_value=settings):
+            with patch.object(
+                mdview, "load_repository", return_value=repository
+            ) as load_repository:
+                with patch.object(mdview.curses, "wrapper"):
+                    self.assertEqual(mdview.main([]), 0)
+        load_repository.assert_called_once_with("https://example.test/docs/")
+
+    def test_local_reader_does_not_load_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "local.md"
+            document.write_text("# Local", encoding="utf-8")
+            with patch.object(mdview, "load_settings") as load_settings:
+                with patch.object(mdview.curses, "wrapper"):
+                    self.assertEqual(mdview.main([str(document)]), 0)
+            load_settings.assert_not_called()
 
 
 class FakeScreen:
@@ -194,7 +360,8 @@ class RepositoryModelTests(unittest.TestCase):
         for key in ("l", mdview.curses.KEY_ENTER):
             view = mdview.RepositoryView(
                 FakeInteractiveScreen([key, "Q"]),
-                "http://example.test/repo/",
+                TEST_APP_SETTINGS,
+                test_repository_settings(),
                 repository,
             )
             view.active_panel = "documents"
@@ -210,7 +377,8 @@ class RepositoryModelTests(unittest.TestCase):
 
         directory_view = mdview.RepositoryView(
             FakeInteractiveScreen(["l", "Q"]),
-            "http://example.test/repo/",
+            TEST_APP_SETTINGS,
+            test_repository_settings(),
             repository,
         )
         directory_view._open_document = open_document
@@ -246,7 +414,8 @@ class RepositoryRefreshTests(unittest.TestCase):
     def _view(self, repository, keys=None):
         return mdview.RepositoryView(
             FakeInteractiveScreen(keys or ["Q"]),
-            "http://example.test/repo/",
+            TEST_APP_SETTINGS,
+            test_repository_settings(),
             repository,
         )
 
@@ -339,6 +508,310 @@ class RepositoryRefreshTests(unittest.TestCase):
         selected_directory = view._selected_directory()
         self.assertEqual(selected_directory.path, ("linux",))
         self.assertEqual(view._documents()[view.document_selected].path, "linux/samba.md")
+
+
+class RepositorySearchTests(unittest.TestCase):
+    """Verify repository-wide search through the interactive action path."""
+
+    @staticmethod
+    def _repository(include_new: bool = False):
+        nested = mdview.RepositoryDirectory(
+            "advanced",
+            ("linux", "advanced"),
+            (),
+            (
+                mdview.RepositoryDocument(
+                    "Routing Guide", "linux/advanced/routing.md"
+                ),
+            ),
+        )
+        linux_documents = [
+            mdview.RepositoryDocument("Network", "linux/network.md"),
+            mdview.RepositoryDocument("MIKRO Notes", "linux/mikro-notes.md"),
+        ]
+        if include_new:
+            linux_documents.append(
+                mdview.RepositoryDocument("New Guide", "linux/new-guide.md")
+            )
+        return mdview.Repository(
+            "Repo",
+            (
+                mdview.RepositoryDirectory(
+                    "hardware",
+                    ("hardware",),
+                    (),
+                    (
+                        mdview.RepositoryDocument(
+                            "Mikrotik", "hardware/mikrotik.md"
+                        ),
+                    ),
+                ),
+                mdview.RepositoryDirectory(
+                    "linux",
+                    ("linux",),
+                    (nested,),
+                    tuple(linux_documents),
+                ),
+            ),
+            (mdview.RepositoryDocument("Overview", "README.md"),),
+        )
+
+    def _view(self, keys):
+        return mdview.RepositoryView(
+            FakeInteractiveScreen(keys),
+            TEST_APP_SETTINGS,
+            test_repository_settings(),
+            self._repository(),
+        )
+
+    def test_searches_full_and_partial_name_case_insensitively(self) -> None:
+        repository = self._repository()
+        self.assertEqual(
+            [document.path for document in mdview.search_repository_documents(
+                repository, "Mikrotik"
+            )],
+            ["hardware/mikrotik.md"],
+        )
+        self.assertEqual(
+            [document.path for document in mdview.search_repository_documents(
+                repository, "mikro"
+            )],
+            ["hardware/mikrotik.md", "linux/mikro-notes.md"],
+        )
+
+    def test_searches_paths_at_every_supported_depth(self) -> None:
+        repository = self._repository()
+        self.assertEqual(
+            [document.path for document in mdview.search_repository_documents(
+                repository, "readme"
+            )],
+            ["README.md"],
+        )
+        self.assertEqual(
+            [document.path for document in mdview.search_repository_documents(
+                repository, "hardware/"
+            )],
+            ["hardware/mikrotik.md"],
+        )
+        self.assertEqual(
+            [document.path for document in mdview.search_repository_documents(
+                repository, "advanced/"
+            )],
+            ["linux/advanced/routing.md"],
+        )
+
+    def test_parser_retains_root_document_for_search(self) -> None:
+        repository = mdview.parse_repository_json(
+            '{"format": 1, "name": "Repo", "items": '
+            '[{"type": "document", "name": "Root", "path": "root.md"}]}'
+        )
+        self.assertEqual(
+            [document.path for document in mdview.search_repository_documents(
+                repository, "root"
+            )],
+            ["root.md"],
+        )
+
+    def test_multiple_and_no_matches(self) -> None:
+        repository = self._repository()
+        self.assertEqual(
+            len(mdview.search_repository_documents(repository, "linux")), 3
+        )
+        self.assertEqual(
+            mdview.search_repository_documents(repository, "absent"), []
+        )
+
+    def test_enter_opens_found_document_through_repository_view(self) -> None:
+        view = self._view(["/", *"routing", "\n", "\n", "Q"])
+        opened: list[str] = []
+        view._open_document = lambda document: opened.append(document.path) or "back"
+        with patch.object(mdview.curses, "curs_set"):
+            view.run()
+        self.assertEqual(opened, ["linux/advanced/routing.md"])
+
+    def test_lowercase_l_opens_found_document_like_enter(self) -> None:
+        view = self._view(["/", *"overview", "\n", "l", "Q"])
+        opened: list[str] = []
+        view._open_document = lambda document: opened.append(document.path) or "back"
+        with patch.object(mdview.curses, "curs_set"):
+            view.run()
+        self.assertEqual(opened, ["README.md"])
+
+    def test_escape_leaves_results_and_restores_browse_state(self) -> None:
+        view = self._view(["/", *"linux", "\n", "\x1b", "Q"])
+        view.active_panel = "documents"
+        view.directory_selected = 1
+        view.document_selected = 1
+        with patch.object(mdview.curses, "curs_set"):
+            view.run()
+        self.assertEqual(view.search_query, "")
+        self.assertEqual(view.active_panel, "documents")
+        self.assertEqual(view.directory_selected, 1)
+        self.assertEqual(view.document_selected, 1)
+
+    def test_escape_cancels_search_input_without_entering_results(self) -> None:
+        view = self._view(["/", *"mikro", "\x1b", "Q"])
+        with patch.object(mdview.curses, "curs_set"):
+            view.run()
+        self.assertIsNone(view.search_input)
+        self.assertEqual(view.search_query, "")
+
+    def test_empty_query_returns_to_normal_browsing(self) -> None:
+        view = self._view(["/", "\n", "Q"])
+        with patch.object(mdview.curses, "curs_set"):
+            view.run()
+        self.assertEqual(view.search_query, "")
+        self.assertEqual(view.search_results, [])
+
+    def test_search_after_refresh_uses_updated_repository(self) -> None:
+        view = self._view(["r", "/", *"new guide", "\n", "Q"])
+        with patch.object(
+            mdview, "load_repository", return_value=self._repository(include_new=True)
+        ):
+            with patch.object(mdview.curses, "curs_set"):
+                view.run()
+        self.assertEqual(
+            [document.path for document in view.search_results],
+            ["linux/new-guide.md"],
+        )
+
+
+class RepositoryDownloadTests(unittest.TestCase):
+    """Verify exact, guarded downloads and Repository View error handling."""
+
+    DOCUMENT = mdview.RepositoryDocument("Guide", "docs/guide.md")
+
+    def test_save_prompt_uses_global_download_directory(self) -> None:
+        repository = RepositorySearchTests._repository()
+        view = mdview.RepositoryView(
+            FakeScreen(),
+            mdview.AppSettings("/global"),
+            test_repository_settings(),
+            repository,
+        )
+        view.active_panel = "documents"
+        view._start_save()
+        self.assertEqual(view.save_input, "/global/mikrotik.md")
+
+    def test_save_prompt_prefers_repository_download_directory(self) -> None:
+        repository = RepositorySearchTests._repository()
+        view = mdview.RepositoryView(
+            FakeScreen(),
+            mdview.AppSettings("/global"),
+            test_repository_settings("/repository"),
+            repository,
+        )
+        view.active_panel = "documents"
+        view._start_save()
+        self.assertEqual(view.save_input, "/repository/mikrotik.md")
+
+    def test_successful_save_preserves_exact_source(self) -> None:
+        source = "# Заголовок\r\n\r\nText without final newline"
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "guide.md"
+            with patch.object(mdview, "fetch_utf8", return_value=source):
+                mdview.save_repository_document(
+                    "http://example.test/repo/", self.DOCUMENT, destination
+                )
+            self.assertEqual(destination.read_bytes(), source.encode("utf-8"))
+
+    def test_http_error_does_not_create_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "guide.md"
+            with patch.object(
+                mdview,
+                "fetch_utf8",
+                side_effect=mdview.RepositoryError("network unavailable"),
+            ):
+                with self.assertRaisesRegex(
+                    mdview.RepositoryError, "network unavailable"
+                ):
+                    mdview.save_repository_document(
+                        "http://example.test/repo/", self.DOCUMENT, destination
+                    )
+            self.assertFalse(destination.exists())
+
+    def test_http_error_is_reported_inside_repository_view(self) -> None:
+        repository = RepositorySearchTests._repository()
+        view = mdview.RepositoryView(
+            FakeScreen(), TEST_APP_SETTINGS, test_repository_settings(), repository
+        )
+        view.save_document = self.DOCUMENT
+        with patch.object(
+            mdview,
+            "save_repository_document",
+            side_effect=mdview.RepositoryError("HTTP 503"),
+        ):
+            view._save_to(Path("guide.md"))
+        self.assertEqual(view.message, "Download failed: HTTP 503")
+        self.assertIsNone(view.save_document)
+
+    def test_write_error_is_reported_inside_repository_view(self) -> None:
+        repository = RepositorySearchTests._repository()
+        view = mdview.RepositoryView(
+            FakeScreen(), TEST_APP_SETTINGS, test_repository_settings(), repository
+        )
+        view.save_document = self.DOCUMENT
+        with patch.object(
+            mdview,
+            "save_repository_document",
+            side_effect=PermissionError("denied"),
+        ):
+            view._save_to(Path("guide.md"))
+        self.assertEqual(view.message, "Save failed: denied")
+        self.assertIsNone(view.save_document)
+
+    def test_existing_file_requires_confirmation_without_downloading(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "guide.md"
+            destination.write_text("existing", encoding="utf-8")
+            with patch.object(mdview, "fetch_utf8") as fetch:
+                with self.assertRaises(FileExistsError):
+                    mdview.save_repository_document(
+                        "http://example.test/repo/", self.DOCUMENT, destination
+                    )
+            fetch.assert_not_called()
+            self.assertEqual(destination.read_text(encoding="utf-8"), "existing")
+
+    def test_existing_file_can_be_replaced_only_after_yes(self) -> None:
+        repository = RepositorySearchTests._repository()
+        view = mdview.RepositoryView(
+            FakeScreen(), TEST_APP_SETTINGS, test_repository_settings(), repository
+        )
+        view.save_document = self.DOCUMENT
+        destination = Path("guide.md")
+        calls: list[bool] = []
+
+        def save(_url, _document, _destination, overwrite=False):
+            calls.append(overwrite)
+            if not overwrite:
+                raise FileExistsError(destination)
+
+        with patch.object(mdview, "save_repository_document", side_effect=save):
+            view._save_to(destination)
+            self.assertEqual(view.overwrite_destination, destination)
+            view._handle_overwrite_confirmation("y")
+        self.assertEqual(calls, [False, True])
+        self.assertEqual(view.message, "Saved: guide.md")
+
+    def test_search_result_uses_same_save_action_and_default_name(self) -> None:
+        repository = RepositorySearchTests._repository()
+        view = mdview.RepositoryView(
+            FakeInteractiveScreen(["/", *"overview", "\n", "d", "\n", "Q"]),
+            TEST_APP_SETTINGS,
+            test_repository_settings(),
+            repository,
+        )
+        saved: list[tuple[str, Path]] = []
+
+        def save_to(destination, overwrite=False):
+            saved.append((view.save_document.path, destination))
+            view.save_document = None
+
+        view._save_to = save_to
+        with patch.object(mdview.curses, "curs_set"):
+            view.run()
+        self.assertEqual(saved, [("README.md", Path("README.md"))])
 
 
 class MarkdownModelTests(unittest.TestCase):
