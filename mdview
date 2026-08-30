@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # mdview — created 2026-08-25, version 0.3.0.
-# Purpose: read Markdown files in a two-pane curses interface.
-# Algorithm: parse and search source lines, map wrapped visual lines back to
-# source lines, and rebuild that mapping whenever the document width changes.
+# Purpose: browse one HTTP repository and read Markdown in a two-pane curses UI.
+# Algorithm: validate repository metadata or parse local source lines, then use
+# the existing mapped Reader for rendering, navigation, resize, and search.
 
 """A small, read-only Markdown viewer for UTF-8 Linux terminals."""
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import curses
+import json
 import locale
 import logging
 import re
@@ -18,9 +19,15 @@ import textwrap
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlsplit
+from urllib.request import Request, urlopen
 
 
 VERSION = "0.3.0"
+REPOSITORY_URL = "http://ricaro.top/mdrepo/"
+HTTP_TIMEOUT_SECONDS = 10
 MIN_TERMINAL_HEIGHT = 8
 MIN_TERMINAL_WIDTH = 40
 MIN_PANEL_WIDTH = 12
@@ -63,6 +70,154 @@ class SearchMatch:
     source_line: int
     source_start: int
     source_end: int
+
+
+@dataclass(frozen=True)
+class RepositoryDocument:
+    """A remote Markdown document described by a repository index."""
+
+    name: str
+    path: str
+
+
+@dataclass(frozen=True)
+class RepositoryDirectory:
+    """A repository directory with direct documents and nested directories."""
+
+    name: str
+    path: tuple[str, ...]
+    directories: tuple[RepositoryDirectory, ...]
+    documents: tuple[RepositoryDocument, ...]
+
+
+@dataclass(frozen=True)
+class Repository:
+    """Validated read-only repository metadata used by Repository View."""
+
+    name: str
+    directories: tuple[RepositoryDirectory, ...]
+
+
+class RepositoryError(ValueError):
+    """Report an invalid or unavailable remote repository without a traceback."""
+
+
+def _required_string(item: dict[str, Any], field: str, context: str) -> str:
+    """Return one required non-empty string from repository metadata."""
+    value = item.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise RepositoryError(f"{context} has no valid {field}")
+    return value.strip()
+
+
+def _parse_repository_items(
+    items: Any, parent_path: tuple[str, ...]
+) -> tuple[tuple[RepositoryDirectory, ...], tuple[RepositoryDocument, ...]]:
+    """Validate repository items and split directories from direct documents."""
+    if not isinstance(items, list):
+        raise RepositoryError("repository items must be a list")
+    directories: list[RepositoryDirectory] = []
+    documents: list[RepositoryDocument] = []
+    for position, raw_item in enumerate(items):
+        context = f"repository item {position}"
+        if not isinstance(raw_item, dict):
+            raise RepositoryError(f"{context} must be an object")
+        item_type = raw_item.get("type")
+        name = _required_string(raw_item, "name", context)
+        if item_type == "directory":
+            child_path = (*parent_path, name)
+            child_directories, child_documents = _parse_repository_items(
+                raw_item.get("items"), child_path
+            )
+            directories.append(
+                RepositoryDirectory(
+                    name,
+                    child_path,
+                    child_directories,
+                    child_documents,
+                )
+            )
+        elif item_type == "document":
+            path = _required_string(raw_item, "path", context)
+            parts = urlsplit(path)
+            if (
+                parts.scheme
+                or parts.netloc
+                or path.startswith("/")
+                or any(part in {"", ".", ".."} for part in parts.path.split("/"))
+            ):
+                raise RepositoryError(f"{context} has an unsafe path")
+            documents.append(RepositoryDocument(name, path))
+        else:
+            raise RepositoryError(f"{context} has unsupported type")
+    return tuple(directories), tuple(documents)
+
+
+def parse_repository_json(source: str) -> Repository:
+    """Parse and validate the supported version of repository.json."""
+    try:
+        raw = json.loads(source)
+    except json.JSONDecodeError as error:
+        raise RepositoryError(f"invalid repository JSON: {error.msg}") from error
+    if not isinstance(raw, dict):
+        raise RepositoryError("repository index must be an object")
+    if raw.get("format") != 1:
+        raise RepositoryError("unsupported repository format")
+    name = _required_string(raw, "name", "repository")
+    directories, _root_documents = _parse_repository_items(raw.get("items"), ())
+    return Repository(name, directories)
+
+
+def repository_directories(
+    repository: Repository,
+) -> list[tuple[RepositoryDirectory, int]]:
+    """Flatten the directory tree for display while retaining nesting depth."""
+    result: list[tuple[RepositoryDirectory, int]] = []
+
+    def visit(directories: tuple[RepositoryDirectory, ...], depth: int) -> None:
+        for directory in directories:
+            result.append((directory, depth))
+            visit(directory.directories, depth + 1)
+
+    visit(repository.directories, 0)
+    return result
+
+
+def document_url(repository_url: str, document_path: str) -> str:
+    """Build an absolute document URL relative to the repository root."""
+    root = repository_url.rstrip("/") + "/"
+    parts = urlsplit(document_path)
+    if (
+        parts.scheme
+        or parts.netloc
+        or document_path.startswith("/")
+        or any(part in {"", ".", ".."} for part in parts.path.split("/"))
+    ):
+        raise RepositoryError("document has an unsafe path")
+    return urljoin(root, document_path)
+
+
+def fetch_utf8(url: str) -> str:
+    """Download one UTF-8 repository resource using the standard library."""
+    request = Request(url, headers={"User-Agent": f"mdview/{VERSION}"})
+    try:
+        with urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            payload = response.read()
+    except HTTPError as error:
+        raise RepositoryError(f"HTTP {error.code} for {url}") from error
+    except URLError as error:
+        raise RepositoryError(f"could not connect to {url}: {error.reason}") from error
+    except OSError as error:
+        raise RepositoryError(f"could not read {url}: {error}") from error
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RepositoryError(f"response is not valid UTF-8: {url}") from error
+
+
+def load_repository(repository_url: str) -> Repository:
+    """Download and parse repository.json for one repository root URL."""
+    return parse_repository_json(fetch_utf8(urljoin(repository_url, "repository.json")))
 
 
 def parse_headings(lines: list[str]) -> list[Heading]:
@@ -483,7 +638,13 @@ def read_markdown(path: Path) -> list[str]:
 class Viewer:
     """Own the viewer state, input handling, resizing, and curses drawing."""
 
-    def __init__(self, screen: curses.window, path: Path, source_lines: list[str]):
+    def __init__(
+        self,
+        screen: curses.window,
+        path: Path,
+        source_lines: list[str],
+        return_on_escape: bool = False,
+    ):
         self.screen = screen
         self.path = path
         self.source_lines = source_lines
@@ -500,9 +661,10 @@ class Viewer:
         self.search_matches: list[SearchMatch] = []
         self.search_match_index: int | None = None
         self.search_message: str | None = None
+        self.return_on_escape = return_on_escape
 
-    def run(self) -> None:
-        """Run the input/render loop until the user requests exit."""
+    def run(self) -> str:
+        """Run the Reader until the user requests exit or repository return."""
         curses.curs_set(0)
         self.screen.keypad(True)
         while True:
@@ -513,8 +675,19 @@ class Viewer:
                 self._handle_search_input(key)
                 continue
             if is_quit_key(key):
-                return
+                return "quit"
+            if self._repository_return_requested(key):
+                return "back"
             self._handle_key(key)
+
+    def _repository_return_requested(self, key: int | str) -> bool:
+        """Treat H in a remote Reader's TOC exactly like its existing Esc."""
+        return (
+            self.return_on_escape
+            and not self.search_query
+            and self.search_message is None
+            and (key == "\x1b" or (key == "H" and self.active_panel == "toc"))
+        )
 
     def _layout(self) -> tuple[int, int, int]:
         height, width = self.screen.getmaxyx()
@@ -799,6 +972,8 @@ class Viewer:
             status = f" {self.search_message}"
         else:
             status = " h Contents  l Document  j/k move  Tab toggle  1/2/3 TOC  / search  Q quit "
+            if self.return_on_escape:
+                status = " Esc/H repository " + status.lstrip()
         self._safe_add(height - 1, 0, status.ljust(width), curses.A_REVERSE)
         if self.search_input is not None:
             cursor_column = min(width - 1, display_width(status))
@@ -895,10 +1070,300 @@ class Viewer:
             LOG.debug("Could not draw text at %s:%s", row, column)
 
 
+class RepositoryView:
+    """Browse one read-only repository and open documents in the Reader."""
+
+    def __init__(
+        self,
+        screen: curses.window,
+        repository_url: str,
+        repository: Repository,
+    ):
+        self.screen = screen
+        self.repository_url = repository_url
+        self.repository = repository
+        self.directory_rows = repository_directories(repository)
+        self.directory_selected = 0
+        self.directory_top = 0
+        self.document_selected = 0
+        self.document_top = 0
+        self.active_panel = "directories"
+        self.message: str | None = None
+
+    def run(self) -> None:
+        """Run Repository View until Q or a nested Reader requests exit."""
+        curses.curs_set(0)
+        self.screen.keypad(True)
+        while True:
+            self._clamp_selection()
+            self._draw()
+            key = self.screen.get_wch()
+            if is_quit_key(key):
+                return
+            self.message = None
+            if key == "\t":
+                self.active_panel = (
+                    "documents"
+                    if self.active_panel == "directories"
+                    else "directories"
+                )
+            elif key == "h":
+                self.active_panel = "directories"
+            elif key == "l":
+                self.active_panel = "documents"
+            else:
+                navigation_key = {
+                    "j": curses.KEY_DOWN,
+                    "k": curses.KEY_UP,
+                }.get(key, key)
+                if self.active_panel == "directories":
+                    self._handle_directory_key(navigation_key)
+                else:
+                    outcome = self._handle_document_key(navigation_key)
+                    if outcome == "quit":
+                        return
+
+    def _layout(self) -> tuple[int, int, int]:
+        height, width = self.screen.getmaxyx()
+        left_width = max(MIN_PANEL_WIDTH, int(width * TOC_RATIO))
+        left_width = min(
+            left_width, max(MIN_PANEL_WIDTH, width - MIN_PANEL_WIDTH)
+        )
+        return height, width, left_width
+
+    def _selected_directory(self) -> RepositoryDirectory | None:
+        if not self.directory_rows:
+            return None
+        return self.directory_rows[self.directory_selected][0]
+
+    def _documents(self) -> tuple[RepositoryDocument, ...]:
+        directory = self._selected_directory()
+        return directory.documents if directory is not None else ()
+
+    def _clamp_selection(self) -> None:
+        height, _, _ = self._layout()
+        visible_height = max(1, height - 3)
+        self.directory_selected = min(
+            self.directory_selected, max(0, len(self.directory_rows) - 1)
+        )
+        documents = self._documents()
+        self.document_selected = min(
+            self.document_selected, max(0, len(documents) - 1)
+        )
+        self.directory_top = self._visible_top(
+            self.directory_top,
+            self.directory_selected,
+            len(self.directory_rows),
+            visible_height,
+        )
+        self.document_top = self._visible_top(
+            self.document_top,
+            self.document_selected,
+            len(documents),
+            visible_height,
+        )
+
+    @staticmethod
+    def _visible_top(
+        top: int, selected: int, count: int, visible_height: int
+    ) -> int:
+        """Keep one selected list row visible without changing its selection."""
+        maximum_top = max(0, count - visible_height)
+        top = min(max(0, top), maximum_top)
+        if selected < top:
+            return selected
+        if selected >= top + visible_height:
+            return selected - visible_height + 1
+        return top
+
+    def _handle_directory_key(self, key: int | str) -> None:
+        previous = self.directory_selected
+        last = max(0, len(self.directory_rows) - 1)
+        if key == curses.KEY_UP:
+            self.directory_selected = max(0, previous - 1)
+        elif key == curses.KEY_DOWN:
+            self.directory_selected = min(last, previous + 1)
+        elif key == curses.KEY_HOME:
+            self.directory_selected = 0
+        elif key == curses.KEY_END:
+            self.directory_selected = last
+        if self.directory_selected != previous:
+            self.document_selected = 0
+            self.document_top = 0
+
+    def _handle_document_key(self, key: int | str) -> str | None:
+        if key == "L":
+            key = curses.KEY_ENTER
+        documents = self._documents()
+        last = max(0, len(documents) - 1)
+        if key == curses.KEY_UP:
+            self.document_selected = max(0, self.document_selected - 1)
+        elif key == curses.KEY_DOWN:
+            self.document_selected = min(last, self.document_selected + 1)
+        elif key == curses.KEY_HOME:
+            self.document_selected = 0
+        elif key == curses.KEY_END:
+            self.document_selected = last
+        elif key in (curses.KEY_ENTER, "\n", "\r") and documents:
+            return self._open_document(documents[self.document_selected])
+        return None
+
+    def _open_document(self, document: RepositoryDocument) -> str | None:
+        """Download one selected document and run the existing Reader for it."""
+        try:
+            url = document_url(self.repository_url, document.path)
+            source_lines = fetch_utf8(url).splitlines()
+        except RepositoryError as error:
+            self.message = str(error)
+            return None
+        reader = Viewer(
+            self.screen,
+            Path(document.name),
+            source_lines,
+            return_on_escape=True,
+        )
+        return reader.run()
+
+    def _draw(self) -> None:
+        self.screen.erase()
+        height, width, left_width = self._layout()
+        if height < MIN_TERMINAL_HEIGHT or width < MIN_TERMINAL_WIDTH:
+            self._safe_add(0, 0, "Resize terminal to at least 40×8", curses.A_BOLD)
+            self.screen.refresh()
+            return
+        content_bottom = height - 1
+        self._draw_box(
+            0,
+            0,
+            content_bottom,
+            left_width,
+            self.active_panel == "directories",
+        )
+        self._draw_box(
+            0,
+            left_width,
+            content_bottom,
+            width,
+            self.active_panel == "documents",
+        )
+        self._safe_add(
+            0, 2, " Directories ", curses.A_BOLD, left_width - 3
+        )
+        self._safe_add(
+            0,
+            left_width + 2,
+            f" Repository: {self.repository.name} ",
+            curses.A_BOLD,
+            width - left_width - 3,
+        )
+        visible_height = max(0, content_bottom - 2)
+        for row, (directory, depth) in enumerate(
+            self.directory_rows[
+                self.directory_top : self.directory_top + visible_height
+            ],
+            1,
+        ):
+            index = self.directory_top + row - 1
+            marker = "> " if index == self.directory_selected else "  "
+            attribute = (
+                curses.A_REVERSE
+                if index == self.directory_selected
+                else curses.A_NORMAL
+            )
+            self._safe_add(
+                row,
+                1,
+                marker + "  " * depth + directory.name,
+                attribute,
+                left_width - 2,
+            )
+        documents = self._documents()
+        for row, document in enumerate(
+            documents[self.document_top : self.document_top + visible_height], 1
+        ):
+            index = self.document_top + row - 1
+            marker = "> " if index == self.document_selected else "  "
+            attribute = (
+                curses.A_REVERSE
+                if index == self.document_selected
+                else curses.A_NORMAL
+            )
+            self._safe_add(
+                row,
+                left_width + 1,
+                marker + document.name,
+                attribute,
+                width - left_width - 2,
+            )
+        status = self.message or (
+            "h Directories  l Documents  j/k move  Tab toggle  Enter/L open  Q quit"
+        )
+        self._safe_add(
+            height - 1,
+            0,
+            f" {status} ".ljust(width),
+            curses.A_REVERSE,
+            width,
+        )
+        self.screen.refresh()
+
+    def _draw_box(
+        self, top: int, left: int, bottom: int, right: int, active: bool
+    ) -> None:
+        attribute = curses.A_BOLD if active else curses.A_NORMAL
+        horizontal = "═" if active else "─"
+        vertical = "║" if active else "│"
+        self._safe_add(top, left, "╔" if active else "┌", attribute)
+        self._safe_add(
+            top, left + 1, horizontal * max(0, right - left - 2), attribute
+        )
+        self._safe_add(top, right - 1, "╗" if active else "┐", attribute)
+        for row in range(top + 1, bottom):
+            self._safe_add(row, left, vertical, attribute)
+            self._safe_add(row, right - 1, vertical, attribute)
+        self._safe_add(bottom - 1, left, "╚" if active else "└", attribute)
+        self._safe_add(
+            bottom - 1,
+            left + 1,
+            horizontal * max(0, right - left - 2),
+            attribute,
+        )
+        self._safe_add(bottom - 1, right - 1, "╝" if active else "┘", attribute)
+
+    def _safe_add(
+        self,
+        row: int,
+        column: int,
+        text: str,
+        attribute: int = 0,
+        limit: int | None = None,
+    ) -> None:
+        """Draw clipped Repository View text without lower-right failures."""
+        height, width = self.screen.getmaxyx()
+        if row < 0 or row >= height or column < 0 or column >= width:
+            return
+        maximum = max(0, width - column)
+        if limit is not None:
+            maximum = min(maximum, max(0, limit))
+        try:
+            self.screen.addstr(
+                row, column, clip_to_display_width(text, maximum), attribute
+            )
+        except curses.error:
+            LOG.debug("Could not draw repository text at %s:%s", row, column)
+
+
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="View a Markdown file in the terminal")
-    parser.add_argument("file", type=Path, help="Markdown file encoded as UTF-8")
+    parser = argparse.ArgumentParser(
+        description="View a local Markdown file or browse the test repository"
+    )
+    parser.add_argument(
+        "file",
+        type=Path,
+        nargs="?",
+        help="local Markdown file encoded as UTF-8",
+    )
     parser.add_argument("--version", action="version", version=f"mdview {VERSION}")
     return parser.parse_args(arguments)
 
@@ -906,15 +1371,31 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
 def main(arguments: list[str] | None = None) -> int:
     """Validate input, enter curses safely, and return a process exit status."""
     args = parse_args(arguments)
-    try:
-        source_lines = read_markdown(args.file)
-    except ValueError as error:
-        print(f"mdview: error: {error}", file=sys.stderr)
-        return 1
+    source_lines: list[str] | None = None
+    repository: Repository | None = None
+    if args.file is not None:
+        try:
+            source_lines = read_markdown(args.file)
+        except ValueError as error:
+            print(f"mdview: error: {error}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            repository = load_repository(REPOSITORY_URL)
+        except RepositoryError as error:
+            print(f"mdview: repository error: {error}", file=sys.stderr)
+            return 1
 
     locale.setlocale(locale.LC_ALL, "")
     try:
-        curses.wrapper(lambda screen: Viewer(screen, args.file, source_lines).run())
+        if args.file is not None and source_lines is not None:
+            curses.wrapper(lambda screen: Viewer(screen, args.file, source_lines).run())
+        elif repository is not None:
+            curses.wrapper(
+                lambda screen: RepositoryView(
+                    screen, REPOSITORY_URL, repository
+                ).run()
+            )
     except KeyboardInterrupt:
         return 130
     except curses.error as error:

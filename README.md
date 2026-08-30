@@ -73,6 +73,20 @@ Then run:
 mdview filename.md
 ```
 
+Run without a file to browse the first read-only test repository:
+
+```console
+mdview
+```
+
+Repository View loads `http://ricaro.top/mdrepo/repository.json`, shows
+directories on the left and their direct documents on the right. Use `Tab`
+to switch panels, `j`/`k` or the arrow keys to select an item, and `Enter` to
+download the selected document into the existing Reader. In the document list,
+`L` opens the selected document as well. `Esc`, or `H` while the Reader TOC has
+focus, returns from a remote document to Repository View without losing the
+current selection.
+
 ### Controls
 
 * `Tab` — switch panels; when leaving the TOC, jump to its selected heading;
@@ -150,7 +164,8 @@ python3 -m py_compile mdview test_mdview.py
 
 The C implementation lives alongside the Python implementation. It uses
 `ncursesw` and wide-character input/output and builds as `build/mdview-c`.
-Both implementations provide the same user-visible behavior.
+Both implementations provide the same local Reader behavior. Repository View
+is currently available only in the Python implementation.
 
 Install a C compiler, `pkg-config`, and the ncurses wide-character development
 package (for example, `libncursesw5-dev` on Debian/Ubuntu), then build and test:
@@ -166,7 +181,7 @@ Run the C version with a UTF-8 Markdown file:
 ./build/mdview-c README.md
 ```
 
-The C port now follows the Python version's user-visible behavior: the
+The C port follows the Python local Reader's user-visible behavior: the
 two-panel TUI and navigation, search and exact match highlighting, resize
 reflow with source mapping, and the same minimal rendering for headings,
 links, inline and fenced code, lists, and tables. `make test` includes
@@ -272,6 +287,20 @@ sudo cp mdview /usr/local/bin/mdview
 mdview filename.md
 ```
 
+Запуск без имени файла открывает первый read-only тестовый репозиторий:
+
+```console
+mdview
+```
+
+Repository View загружает `http://ricaro.top/mdrepo/repository.json`, слева
+показывает каталоги, а справа — документы выбранного каталога. `Tab`
+переключает панели, `j`/`k` и стрелки выбирают элементы, `Enter` загружает
+выбранный документ в существующий Reader. В списке документов `L` также
+открывает выбранный документ. `Esc` либо `H` при активной панели оглавления
+Reader возвращает из сетевого документа в Repository View с сохранением
+текущего выбора.
+
 ### Управление
 
 * `Tab` — переключение панелей; при выходе из оглавления выполняется переход к выбранному заголовку;
@@ -349,7 +378,8 @@ python3 -m py_compile mdview test_mdview.py
 
 Рядом с Python-реализацией размещена реализация на C. Она использует
 `ncursesw` и wide-character API и собирается как `build/mdview-c`.
-Обе реализации предоставляют одинаковое пользовательское поведение.
+Обе реализации предоставляют одинаковое поведение локального Reader.
+Repository View пока доступен только в Python-реализации.
 
 Для сборки нужны C-компилятор, `pkg-config` и development-пакет wide-character
 ncurses (например, `libncursesw5-dev` в Debian/Ubuntu):
@@ -365,7 +395,7 @@ make test
 ./build/mdview-c README.md
 ```
 
-C-порт повторяет пользовательское поведение Python-версии: двухпанельный TUI
+C-порт повторяет поведение локального Python Reader: двухпанельный TUI
 и навигацию, поиск с точной подсветкой, перестроение после resize с source
 mapping и тот же минимальный рендер заголовков, ссылок, inline/fenced code,
 списков и таблиц. `make test` запускает автономные C-тесты, проверки CLI,

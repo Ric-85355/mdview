@@ -1,5 +1,5 @@
 # test_mdview.py — created 2026-08-25, version 0.3.0.
-# Purpose: regression tests for Markdown display, navigation, and search.
+# Purpose: regression tests for repository browsing, Markdown display, navigation, and search.
 # Algorithm: load the extensionless application module, feed deterministic
 # Markdown samples to its model and viewer, and assert state transitions.
 
@@ -44,6 +44,10 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(process.stdout, "mdview 0.3.0\n")
 
+    def test_local_file_is_optional(self) -> None:
+        self.assertIsNone(mdview.parse_args([]).file)
+        self.assertEqual(mdview.parse_args(["sample.md"]).file, Path("sample.md"))
+
 
 class FakeScreen:
     """Provide terminal dimensions for viewer state tests."""
@@ -55,6 +59,123 @@ class FakeScreen:
     def getmaxyx(self) -> tuple[int, int]:
         """Return configured terminal dimensions."""
         return self.height, self.width
+
+
+class RepositoryModelTests(unittest.TestCase):
+    """Verify repository validation, directory traversal, and URL building."""
+
+    SOURCE = """{
+        "format": 1,
+        "name": "Test Documentation",
+        "items": [
+            {
+                "type": "directory",
+                "name": "hardware",
+                "items": [
+                    {
+                        "type": "document",
+                        "name": "mikrotik",
+                        "path": "hardware/mikrotik.md"
+                    },
+                    {
+                        "type": "directory",
+                        "name": "marine",
+                        "items": [
+                            {
+                                "type": "document",
+                                "name": "raymarine",
+                                "path": "hardware/marine/raymarine.md"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "directory",
+                "name": "linux",
+                "items": [
+                    {
+                        "type": "document",
+                        "name": "samba",
+                        "path": "linux/samba.md"
+                    }
+                ]
+            }
+        ]
+    }"""
+
+    def test_parses_valid_repository_and_direct_documents(self) -> None:
+        repository = mdview.parse_repository_json(self.SOURCE)
+        self.assertEqual(repository.name, "Test Documentation")
+        self.assertEqual(
+            [directory.name for directory in repository.directories],
+            ["hardware", "linux"],
+        )
+        self.assertEqual(
+            [document.name for document in repository.directories[0].documents],
+            ["mikrotik"],
+        )
+        self.assertEqual(
+            repository.directories[0].documents[0].path,
+            "hardware/mikrotik.md",
+        )
+
+    def test_flattens_nested_directory_tree_with_depth(self) -> None:
+        repository = mdview.parse_repository_json(self.SOURCE)
+        rows = mdview.repository_directories(repository)
+        self.assertEqual(
+            [(directory.name, depth) for directory, depth in rows],
+            [("hardware", 0), ("marine", 1), ("linux", 0)],
+        )
+        self.assertEqual(
+            [document.name for document in rows[1][0].documents], ["raymarine"]
+        )
+
+    def test_builds_document_url_relative_to_repository_root(self) -> None:
+        self.assertEqual(
+            mdview.document_url(
+                "http://ricaro.top/mdrepo/", "hardware/mikrotik.md"
+            ),
+            "http://ricaro.top/mdrepo/hardware/mikrotik.md",
+        )
+
+    def test_rejects_invalid_json(self) -> None:
+        with self.assertRaisesRegex(mdview.RepositoryError, "invalid repository JSON"):
+            mdview.parse_repository_json("{broken")
+
+    def test_rejects_missing_required_fields(self) -> None:
+        with self.assertRaisesRegex(mdview.RepositoryError, "valid name"):
+            mdview.parse_repository_json('{"format": 1, "items": []}')
+        with self.assertRaisesRegex(mdview.RepositoryError, "valid path"):
+            mdview.parse_repository_json(
+                '{"format": 1, "name": "x", "items": '
+                '[{"type": "document", "name": "doc"}]}'
+            )
+
+    def test_rejects_unsupported_format_and_unsafe_paths(self) -> None:
+        with self.assertRaisesRegex(mdview.RepositoryError, "unsupported"):
+            mdview.parse_repository_json(
+                '{"format": 2, "name": "x", "items": []}'
+            )
+        with self.assertRaisesRegex(mdview.RepositoryError, "unsafe path"):
+            mdview.document_url("http://example.test/repo/", "../secret.md")
+
+    def test_uppercase_l_opens_selected_document_like_enter(self) -> None:
+        repository = mdview.parse_repository_json(self.SOURCE)
+        view = mdview.RepositoryView(
+            FakeScreen(), "http://example.test/repo/", repository
+        )
+        opened: list[mdview.RepositoryDocument] = []
+
+        def open_document(document):
+            opened.append(document)
+            return "back"
+
+        view._open_document = open_document
+        uppercase_result = view._handle_document_key("L")
+        enter_result = view._handle_document_key(mdview.curses.KEY_ENTER)
+        self.assertEqual(uppercase_result, enter_result)
+        self.assertEqual([document.name for document in opened], ["mikrotik"] * 2)
 
 
 class MarkdownModelTests(unittest.TestCase):
@@ -322,6 +443,20 @@ class NavigationStateTests(unittest.TestCase):
         viewer._handle_key("h")
         self.assertEqual(viewer.document_top, 3)
         self.assertEqual(viewer.toc_selected, 4)
+
+    def test_uppercase_h_returns_from_remote_reader_toc_like_escape(self) -> None:
+        viewer = self._viewer()
+        viewer.return_on_escape = True
+        viewer.active_panel = "toc"
+        self.assertEqual(
+            viewer._repository_return_requested("H"),
+            viewer._repository_return_requested("\x1b"),
+        )
+        viewer.active_panel = "document"
+        self.assertFalse(viewer._repository_return_requested("H"))
+        viewer.active_panel = "toc"
+        viewer.return_on_escape = False
+        self.assertFalse(viewer._repository_return_requested("H"))
 
     def test_l_activates_document_at_selected_heading(self) -> None:
         viewer = self._viewer()
