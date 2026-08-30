@@ -88,7 +88,15 @@ to switch panels, `j`/`k` or the arrow keys to select an item, and `Enter` to
 download the selected document into the existing Reader. In the document list,
 `l` opens the selected document as well. `Esc`, or `h` while the Reader TOC has
 focus, returns from a remote document to Repository View without losing the
-current selection.
+current selection. Press `r` in Repository View to request `repository.json`
+again and refresh the directory/document lists without restarting mdview.
+
+### Dynamic Repository Server
+
+The shared-hosting deployment bundle is in `server/mdrepo/`. Its PHP generator
+builds format-1 `repository.json` from the actual `.md` files, using
+`repository.meta.json` for the repository name and optional description. See
+`server/README.md` for Hostinger deployment and verification instructions.
 
 ### Controls
 
@@ -306,7 +314,15 @@ Repository View загружает `http://ricaro.top/mdrepo/repository.json`, �
 выбранный документ в существующий Reader. В списке документов `l` также
 открывает выбранный документ. `Esc` либо `h` при активной панели оглавления
 Reader возвращает из сетевого документа в Repository View с сохранением
-текущего выбора.
+текущего выбора. Клавиша `r` в Repository View повторно запрашивает
+`repository.json` и обновляет каталоги и документы без перезапуска mdview.
+
+### Динамический сервер репозитория
+
+Deploy-комплект для shared hosting находится в `server/mdrepo/`. PHP-генератор
+формирует `repository.json` формата 1 из фактических `.md`-файлов, а имя и
+необязательное описание берёт из `repository.meta.json`. Инструкции загрузки
+на Hostinger и проверки находятся в `server/README.md`.
 
 ### Управление
 

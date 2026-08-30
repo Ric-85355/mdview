@@ -1,0 +1,10 @@
+# .htaccess — created 2026-08-30, version 0.3.0.
+# Purpose: route only repository.json to the local dynamic PHP generator.
+# Algorithm: apply one directory-local rewrite and leave Markdown files static.
+
+RewriteEngine On
+RewriteRule ^repository\.json$ repository.php [L]
+
+<Files "repository.meta.json">
+    Require all denied
+</Files>

@@ -219,6 +219,128 @@ class RepositoryModelTests(unittest.TestCase):
         self.assertEqual(opened, ["mikrotik", "mikrotik"])
 
 
+class RepositoryRefreshTests(unittest.TestCase):
+    """Verify atomic repository refresh and selection restoration."""
+
+    @staticmethod
+    def _repository(
+        name: str,
+        directories: list[tuple[str, list[tuple[str, str]]]],
+    ):
+        return mdview.Repository(
+            name,
+            tuple(
+                mdview.RepositoryDirectory(
+                    directory_name,
+                    (directory_name,),
+                    (),
+                    tuple(
+                        mdview.RepositoryDocument(document_name, document_path)
+                        for document_name, document_path in documents
+                    ),
+                )
+                for directory_name, documents in directories
+            ),
+        )
+
+    def _view(self, repository, keys=None):
+        return mdview.RepositoryView(
+            FakeInteractiveScreen(keys or ["Q"]),
+            "http://example.test/repo/",
+            repository,
+        )
+
+    def test_successful_r_refresh_replaces_repository(self) -> None:
+        original = self._repository("Old", [("docs", [("one", "docs/one.md")])])
+        updated = self._repository("New", [("docs", [("one", "docs/one.md")])])
+        view = self._view(original, ["r", "Q"])
+        with patch.object(mdview, "load_repository", return_value=updated):
+            with patch.object(mdview.curses, "curs_set"):
+                view.run()
+        self.assertIs(view.repository, updated)
+        self.assertEqual(view.message, "Repository refreshed")
+
+    def test_new_document_appears_after_refresh(self) -> None:
+        original = self._repository("Repo", [("docs", [("one", "docs/one.md")])])
+        updated = self._repository(
+            "Repo",
+            [("docs", [("one", "docs/one.md"), ("two", "docs/two.md")])],
+        )
+        view = self._view(original)
+        with patch.object(mdview, "load_repository", return_value=updated):
+            view._refresh_repository()
+        self.assertEqual([document.name for document in view._documents()], ["one", "two"])
+
+    def test_removed_selected_document_uses_nearest_index(self) -> None:
+        original = self._repository(
+            "Repo",
+            [
+                (
+                    "docs",
+                    [
+                        ("one", "docs/one.md"),
+                        ("two", "docs/two.md"),
+                        ("three", "docs/three.md"),
+                    ],
+                )
+            ],
+        )
+        updated = self._repository(
+            "Repo",
+            [("docs", [("one", "docs/one.md"), ("three", "docs/three.md")])],
+        )
+        view = self._view(original)
+        view.document_selected = 1
+        with patch.object(mdview, "load_repository", return_value=updated):
+            view._refresh_repository()
+        self.assertEqual(view.document_selected, 1)
+        self.assertEqual(view._documents()[view.document_selected].name, "three")
+
+    def test_refresh_error_keeps_old_repository_and_selection(self) -> None:
+        original = self._repository(
+            "Repo", [("docs", [("one", "docs/one.md"), ("two", "docs/two.md")])]
+        )
+        view = self._view(original)
+        view.document_selected = 1
+        with patch.object(
+            mdview,
+            "load_repository",
+            side_effect=mdview.RepositoryError("network unavailable"),
+        ):
+            view._refresh_repository()
+        self.assertIs(view.repository, original)
+        self.assertEqual(view.document_selected, 1)
+        self.assertEqual(view.message, "Refresh failed: network unavailable")
+
+    def test_existing_directory_and_document_selection_are_preserved(self) -> None:
+        original = self._repository(
+            "Repo",
+            [
+                ("hardware", [("router", "hardware/router.md")]),
+                ("linux", [("samba", "linux/samba.md")]),
+            ],
+        )
+        updated = self._repository(
+            "Repo",
+            [
+                ("archive", [("old", "archive/old.md")]),
+                ("hardware", [("router", "hardware/router.md")]),
+                (
+                    "linux",
+                    [("network", "linux/network.md"), ("samba", "linux/samba.md")],
+                ),
+            ],
+        )
+        view = self._view(original)
+        view.directory_selected = 1
+        view.document_selected = 0
+        with patch.object(mdview, "load_repository", return_value=updated):
+            view._refresh_repository()
+        selected_directory = view._selected_directory()
+        self.assertEqual(selected_directory.path, ("linux",))
+        self.assertEqual(view._documents()[view.document_selected].path, "linux/samba.md")
+
+
 class MarkdownModelTests(unittest.TestCase):
     """Verify parsing, wrapping, UTF-8 content, and heading destinations."""
 

@@ -1105,7 +1105,9 @@ class RepositoryView:
             if key == "l" and self.active_panel == "documents":
                 key = curses.KEY_ENTER
             self.message = None
-            if key == "\t":
+            if key == "r":
+                self._refresh_repository()
+            elif key == "\t":
                 self.active_panel = (
                     "documents"
                     if self.active_panel == "directories"
@@ -1143,6 +1145,61 @@ class RepositoryView:
     def _documents(self) -> tuple[RepositoryDocument, ...]:
         directory = self._selected_directory()
         return directory.documents if directory is not None else ()
+
+    def _refresh_repository(self) -> None:
+        """Reload the index atomically and retain selections by stable paths."""
+        selected_directory = self._selected_directory()
+        selected_directory_path = (
+            selected_directory.path if selected_directory is not None else None
+        )
+        documents = self._documents()
+        selected_document_path = (
+            documents[self.document_selected].path if documents else None
+        )
+        old_directory_index = self.directory_selected
+        old_document_index = self.document_selected
+
+        try:
+            updated_repository = load_repository(self.repository_url)
+        except RepositoryError as error:
+            self.message = f"Refresh failed: {error}"
+            return
+
+        updated_rows = repository_directories(updated_repository)
+        matching_directory = next(
+            (
+                index
+                for index, (directory, _depth) in enumerate(updated_rows)
+                if directory.path == selected_directory_path
+            ),
+            None,
+        )
+        self.repository = updated_repository
+        self.directory_rows = updated_rows
+        if matching_directory is None:
+            self.directory_selected = min(
+                old_directory_index, max(0, len(updated_rows) - 1)
+            )
+        else:
+            self.directory_selected = matching_directory
+
+        updated_documents = self._documents()
+        matching_document = next(
+            (
+                index
+                for index, document in enumerate(updated_documents)
+                if document.path == selected_document_path
+            ),
+            None,
+        )
+        if matching_document is None:
+            self.document_selected = min(
+                old_document_index, max(0, len(updated_documents) - 1)
+            )
+        else:
+            self.document_selected = matching_document
+        self._clamp_selection()
+        self.message = "Repository refreshed"
 
     def _clamp_selection(self) -> None:
         height, _, _ = self._layout()
@@ -1298,7 +1355,7 @@ class RepositoryView:
                 width - left_width - 2,
             )
         status = self.message or (
-            "h Directories  l Documents/open  j/k move  Tab toggle  Enter open  Q quit"
+            "h Directories  l Documents/open  j/k move  r Refresh  Enter open  Q quit"
         )
         self._safe_add(
             height - 1,
