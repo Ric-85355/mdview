@@ -940,7 +940,11 @@ class Viewer:
             if self.search_input is not None:
                 self._handle_search_input(key)
                 continue
-            if key == "h" and self.return_on_escape and self.active_panel == "toc":
+            if (
+                key in ("h", curses.KEY_LEFT)
+                and self.return_on_escape
+                and self.active_panel == "toc"
+            ):
                 key = "\x1b"
             if is_quit_key(key):
                 return "quit"
@@ -1004,6 +1008,10 @@ class Viewer:
         height, _, _ = self._layout()
         page = max(1, height - 4)
         self.search_message = None
+        key = {
+            curses.KEY_LEFT: "h",
+            curses.KEY_RIGHT: "l",
+        }.get(key, key)
         if key == "\x1b":
             self._reset_search()
         elif key == "/":
@@ -1347,6 +1355,7 @@ class RepositoryView:
         app_settings: AppSettings,
         repository_settings: RepositorySettings,
         repository: Repository,
+        initial_directory_path: tuple[str, ...] | None = None,
     ):
         self.screen = screen
         self.app_settings = app_settings
@@ -1354,7 +1363,14 @@ class RepositoryView:
         self.repository_url = repository_settings.url
         self.repository = repository
         self.directory_rows = repository_directories(repository)
-        self.directory_selected = 0
+        self.directory_selected = next(
+            (
+                index
+                for index, (directory, _depth) in enumerate(self.directory_rows)
+                if directory.path == initial_directory_path
+            ),
+            0,
+        )
         self.directory_top = 0
         self.document_selected = 0
         self.document_top = 0
@@ -1370,8 +1386,8 @@ class RepositoryView:
         self.save_document: RepositoryDocument | None = None
         self.overwrite_destination: Path | None = None
 
-    def run(self) -> None:
-        """Run Repository View until Q or a nested Reader requests exit."""
+    def run(self) -> str:
+        """Run Repository View until the user requests Sources or application exit."""
         curses.curs_set(0)
         self.screen.keypad(True)
         while True:
@@ -1388,8 +1404,8 @@ class RepositoryView:
                 self._handle_overwrite_confirmation(key)
                 continue
             if is_quit_key(key):
-                return
-            if key == "l" and self.active_panel == "documents":
+                return "quit"
+            if key in ("l", curses.KEY_RIGHT) and self.active_panel == "documents":
                 key = curses.KEY_ENTER
             self.message = None
             if key == "\x1b" and self.search_query:
@@ -1406,9 +1422,11 @@ class RepositoryView:
                     if self.active_panel == "directories"
                     else "directories"
                 )
-            elif key == "h":
+            elif key in ("h", curses.KEY_LEFT):
+                if self.active_panel == "directories":
+                    return "back"
                 self.active_panel = "directories"
-            elif key == "l":
+            elif key in ("l", curses.KEY_RIGHT):
                 self.active_panel = "documents"
             else:
                 navigation_key = {
@@ -1420,7 +1438,7 @@ class RepositoryView:
                 else:
                     outcome = self._handle_document_key(navigation_key)
                     if outcome == "quit":
-                        return
+                        return "quit"
 
     def _layout(self) -> tuple[int, int, int]:
         height, width = self.screen.getmaxyx()
@@ -1829,7 +1847,7 @@ class RepositoryView:
             )
         else:
             status = (
-                "h Directories  l Documents/open  j/k move  / Search  "
+                "h/← Sources/dirs  l/→ Documents/open  j/k move  / Search  "
                 "r Refresh  d Save  Enter open  Q quit"
             )
         self._safe_add(
@@ -1887,6 +1905,324 @@ class RepositoryView:
             LOG.debug("Could not draw repository text at %s:%s", row, column)
 
 
+class SourcesView:
+    """Browse Local and configured repositories before entering a Reader."""
+
+    def __init__(self, screen: curses.window, settings: Settings):
+        self.screen = screen
+        self.settings = settings
+        self.source_selected = 0
+        self.source_top = 0
+        self.folder_selected = 0
+        self.folder_top = 0
+        self.active_panel = "sources"
+        self.repositories: dict[str, Repository] = {}
+        self.message: str | None = None
+        self.local_path_input: str | None = None
+
+    def run(self) -> str:
+        """Run Sources until Q or a nested view requests application exit."""
+        curses.curs_set(0)
+        self.screen.keypad(True)
+        while True:
+            self._clamp_selection()
+            self._draw()
+            key = self.screen.get_wch()
+            if self.local_path_input is not None:
+                outcome = self._handle_local_path_input(key)
+                if outcome == "quit":
+                    return "quit"
+                continue
+            if is_quit_key(key):
+                return "quit"
+            self.message = None
+            if key in ("j", curses.KEY_DOWN, "k", curses.KEY_UP):
+                navigation_key = {
+                    "j": curses.KEY_DOWN,
+                    "k": curses.KEY_UP,
+                }.get(key, key)
+                if self.active_panel == "sources":
+                    self._handle_source_key(navigation_key)
+                else:
+                    self._handle_folder_key(navigation_key)
+            elif key == "\t":
+                if self._selected_repository() is not None and self._folders():
+                    self.active_panel = (
+                        "folders" if self.active_panel == "sources" else "sources"
+                    )
+            elif key in ("h", curses.KEY_LEFT):
+                self.active_panel = "sources"
+            elif key in ("l", curses.KEY_RIGHT):
+                outcome = self._activate_forward()
+                if outcome == "quit":
+                    return "quit"
+            elif key in (curses.KEY_ENTER, "\n", "\r"):
+                outcome = self._activate_current()
+                if outcome == "quit":
+                    return "quit"
+
+    def _source_names(self) -> list[str]:
+        """Return the system source followed by every configured alias."""
+        return ["Local", *(item.name for item in self.settings.repositories)]
+
+    def _selected_repository(self) -> RepositorySettings | None:
+        if self.source_selected == 0:
+            return None
+        return self.settings.repositories[self.source_selected - 1]
+
+    def _loaded_repository(self) -> Repository | None:
+        repository_settings = self._selected_repository()
+        if repository_settings is None:
+            return None
+        return self.repositories.get(repository_settings.id)
+
+    def _folders(self) -> tuple[RepositoryDirectory, ...]:
+        repository = self._loaded_repository()
+        return repository.directories if repository is not None else ()
+
+    def _ensure_selected_repository(self) -> Repository | None:
+        """Load the selected index once and retain it by stable repository ID."""
+        repository_settings = self._selected_repository()
+        if repository_settings is None:
+            return None
+        existing = self.repositories.get(repository_settings.id)
+        if existing is not None:
+            return existing
+        try:
+            repository = load_repository(repository_settings.url)
+        except RepositoryError as error:
+            self.message = f"Repository error: {error}"
+            return None
+        self.repositories[repository_settings.id] = repository
+        return repository
+
+    def _handle_source_key(self, key: int | str) -> None:
+        previous = self.source_selected
+        last = len(self.settings.repositories)
+        if key == curses.KEY_UP:
+            self.source_selected = max(0, previous - 1)
+        elif key == curses.KEY_DOWN:
+            self.source_selected = min(last, previous + 1)
+        if self.source_selected != previous:
+            self.folder_selected = 0
+            self.folder_top = 0
+            self._ensure_selected_repository()
+
+    def _handle_folder_key(self, key: int | str) -> None:
+        folders = self._folders()
+        last = max(0, len(folders) - 1)
+        if key == curses.KEY_UP:
+            self.folder_selected = max(0, self.folder_selected - 1)
+        elif key == curses.KEY_DOWN:
+            self.folder_selected = min(last, self.folder_selected + 1)
+
+    def _activate_forward(self) -> str | None:
+        """Apply the spatial l/right action without duplicating Enter actions."""
+        if self.active_panel == "folders":
+            return self._open_selected_repository()
+        if self._selected_repository() is None:
+            return self._activate_current()
+        repository = self._ensure_selected_repository()
+        if repository is not None and repository.directories:
+            self.active_panel = "folders"
+        elif repository is not None:
+            self.message = "No top-level folders"
+        return None
+
+    def _activate_current(self) -> str | None:
+        """Activate Local, a repository alias, or a top-level folder."""
+        if self.active_panel == "folders":
+            return self._open_selected_repository()
+        if self._selected_repository() is None:
+            self.local_path_input = ""
+            return None
+        return self._activate_forward()
+
+    def _handle_local_path_input(self, key: int | str) -> str | None:
+        """Edit a local path and open it through the existing Reader."""
+        if key == "\x1b":
+            self.local_path_input = None
+            return None
+        if key in (curses.KEY_ENTER, "\n", "\r"):
+            path_text = self.local_path_input or ""
+            self.local_path_input = None
+            if not path_text:
+                self.message = "Local error: path is empty"
+                return None
+            path = Path(path_text).expanduser()
+            try:
+                source_lines = read_markdown(path)
+            except ValueError as error:
+                self.message = f"Local error: {error}"
+                return None
+            return Viewer(
+                self.screen,
+                path,
+                source_lines,
+                return_on_escape=True,
+            ).run()
+        if key in (curses.KEY_BACKSPACE, "\b", "\x7f", 8, 127):
+            self.local_path_input = (self.local_path_input or "")[:-1]
+        elif isinstance(key, str) and key.isprintable():
+            self.local_path_input = (self.local_path_input or "") + key
+        return None
+
+    def _open_selected_repository(self) -> str | None:
+        """Enter Repository View at the selected first-level folder."""
+        repository_settings = self._selected_repository()
+        repository = self._ensure_selected_repository()
+        folders = self._folders()
+        if repository_settings is None or repository is None or not folders:
+            return None
+        folder = folders[self.folder_selected]
+        repository_view = RepositoryView(
+            self.screen,
+            self.settings.app,
+            repository_settings,
+            repository,
+            initial_directory_path=folder.path,
+        )
+        outcome = repository_view.run()
+        self.repositories[repository_settings.id] = repository_view.repository
+        return outcome if outcome == "quit" else None
+
+    def _clamp_selection(self) -> None:
+        height, _, _ = self._layout()
+        visible_height = max(1, height - 3)
+        source_count = len(self.settings.repositories) + 1
+        self.source_selected = min(self.source_selected, source_count - 1)
+        folders = self._folders()
+        self.folder_selected = min(
+            self.folder_selected, max(0, len(folders) - 1)
+        )
+        self.source_top = RepositoryView._visible_top(
+            self.source_top,
+            self.source_selected,
+            source_count,
+            visible_height,
+        )
+        self.folder_top = RepositoryView._visible_top(
+            self.folder_top,
+            self.folder_selected,
+            len(folders),
+            visible_height,
+        )
+
+    def _layout(self) -> tuple[int, int, int]:
+        height, width = self.screen.getmaxyx()
+        left_width = max(MIN_PANEL_WIDTH, int(width * TOC_RATIO))
+        left_width = min(left_width, max(MIN_PANEL_WIDTH, width - MIN_PANEL_WIDTH))
+        return height, width, left_width
+
+    def _draw(self) -> None:
+        self.screen.erase()
+        height, width, left_width = self._layout()
+        if height < MIN_TERMINAL_HEIGHT or width < MIN_TERMINAL_WIDTH:
+            self._safe_add(0, 0, "Resize terminal to at least 40×8", curses.A_BOLD)
+            self.screen.refresh()
+            return
+        content_bottom = height - 1
+        self._draw_box(
+            0, 0, content_bottom, left_width, self.active_panel == "sources"
+        )
+        self._draw_box(
+            0, left_width, content_bottom, width, self.active_panel == "folders"
+        )
+        self._safe_add(0, 2, " Sources ", curses.A_BOLD, left_width - 3)
+        self._safe_add(
+            0,
+            left_width + 2,
+            " Top-level folders ",
+            curses.A_BOLD,
+            width - left_width - 3,
+        )
+        visible_height = max(0, content_bottom - 2)
+        names = self._source_names()
+        for row, name in enumerate(
+            names[self.source_top : self.source_top + visible_height], 1
+        ):
+            index = self.source_top + row - 1
+            marker = "> " if index == self.source_selected else "  "
+            attribute = (
+                curses.A_REVERSE if index == self.source_selected else curses.A_NORMAL
+            )
+            self._safe_add(row, 1, marker + name, attribute, left_width - 2)
+        folders = self._folders()
+        for row, folder in enumerate(
+            folders[self.folder_top : self.folder_top + visible_height], 1
+        ):
+            index = self.folder_top + row - 1
+            marker = "> " if index == self.folder_selected else "  "
+            attribute = (
+                curses.A_REVERSE if index == self.folder_selected else curses.A_NORMAL
+            )
+            self._safe_add(
+                row,
+                left_width + 1,
+                marker + folder.name,
+                attribute,
+                width - left_width - 2,
+            )
+        if self.local_path_input is not None:
+            status = f"Local path: {self.local_path_input}  Enter open  Esc cancel"
+        elif self.message:
+            status = self.message
+        else:
+            status = (
+                "h/← back  l/→ forward  Tab panel  j/k move  Enter activate  Q quit"
+            )
+        self._safe_add(
+            height - 1,
+            0,
+            f" {status} ".ljust(width),
+            curses.A_REVERSE,
+            width,
+        )
+        self.screen.refresh()
+
+    def _draw_box(
+        self, top: int, left: int, bottom: int, right: int, active: bool
+    ) -> None:
+        attribute = curses.A_BOLD if active else curses.A_NORMAL
+        horizontal = "═" if active else "─"
+        vertical = "║" if active else "│"
+        self._safe_add(top, left, "╔" if active else "┌", attribute)
+        self._safe_add(top, left + 1, horizontal * max(0, right - left - 2), attribute)
+        self._safe_add(top, right - 1, "╗" if active else "┐", attribute)
+        for row in range(top + 1, bottom):
+            self._safe_add(row, left, vertical, attribute)
+            self._safe_add(row, right - 1, vertical, attribute)
+        self._safe_add(bottom - 1, left, "╚" if active else "└", attribute)
+        self._safe_add(
+            bottom - 1,
+            left + 1,
+            horizontal * max(0, right - left - 2),
+            attribute,
+        )
+        self._safe_add(bottom - 1, right - 1, "╝" if active else "┘", attribute)
+
+    def _safe_add(
+        self,
+        row: int,
+        column: int,
+        text: str,
+        attribute: int = 0,
+        limit: int | None = None,
+    ) -> None:
+        height, width = self.screen.getmaxyx()
+        if row < 0 or row >= height or column < 0 or column >= width:
+            return
+        maximum = max(0, width - column)
+        if limit is not None:
+            maximum = min(maximum, max(0, limit))
+        try:
+            self.screen.addstr(
+                row, column, clip_to_display_width(text, maximum), attribute
+            )
+        except curses.error:
+            LOG.debug("Could not draw Sources text at %s:%s", row, column)
+
+
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -1906,9 +2242,7 @@ def main(arguments: list[str] | None = None) -> int:
     """Validate input, enter curses safely, and return a process exit status."""
     args = parse_args(arguments)
     source_lines: list[str] | None = None
-    repository: Repository | None = None
-    app_settings: AppSettings | None = None
-    repository_settings: RepositorySettings | None = None
+    settings: Settings | None = None
     if args.file is not None:
         try:
             source_lines = read_markdown(args.file)
@@ -1918,30 +2252,16 @@ def main(arguments: list[str] | None = None) -> int:
     else:
         try:
             settings = load_settings()
-            app_settings = settings.app
-            repository_settings = settings.repositories[0]
-            repository = load_repository(repository_settings.url)
         except ConfigError as error:
             print(f"mdview: config error: {error}", file=sys.stderr)
-            return 1
-        except RepositoryError as error:
-            print(f"mdview: repository error: {error}", file=sys.stderr)
             return 1
 
     locale.setlocale(locale.LC_ALL, "")
     try:
         if args.file is not None and source_lines is not None:
             curses.wrapper(lambda screen: Viewer(screen, args.file, source_lines).run())
-        elif (
-            repository is not None
-            and app_settings is not None
-            and repository_settings is not None
-        ):
-            curses.wrapper(
-                lambda screen: RepositoryView(
-                    screen, app_settings, repository_settings, repository
-                ).run()
-            )
+        elif settings is not None:
+            curses.wrapper(lambda screen: SourcesView(screen, settings).run())
     except KeyboardInterrupt:
         return 130
     except curses.error as error:

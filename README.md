@@ -76,19 +76,26 @@ Then run:
 mdview filename.md
 ```
 
-Run without a file to browse the first configured repository:
+Run without a file to open Sources:
 
 ```console
 mdview
 ```
 
-Repository View loads the first entry from the settings file, shows
-directories on the left and their direct documents on the right. Use `Tab`
-to switch panels, `j`/`k` or the arrow keys to select an item, and `Enter` to
-download the selected document into the existing Reader. In the document list,
-`l` opens the selected document as well. `Esc`, or `h` while the Reader TOC has
-focus, returns from a remote document to Repository View without losing the
-current selection. Press `r` in Repository View to request `repository.json`
+Sources shows the system `Local` entry followed by every configured repository.
+Select `Local` and press `Enter` or `l` to enter an absolute, relative, or
+`~`-based Markdown path and open it in the existing Reader. A local document
+opened this way returns to Sources; a file passed on the command line retains
+the original exit behavior.
+
+For a repository, the right Sources panel shows its top-level directories.
+Activate one to enter Repository View, where directories are shown on the left
+and their direct documents on the right. Use `Tab` to switch panels, `j`/`k` or
+the arrow keys to select an item, `h`/left to move back, `l`/right to move
+forward, and `Enter` to activate. In the document list, `l` opens the selected
+document as well. `Esc`, or `h`/left while the Reader TOC has focus, returns
+from a document to its parent view without losing the current selection. Press
+`r` in Repository View to request `repository.json`
 again and refresh the directory/document lists without restarting mdview.
 Press `/`, type a query, and press `Enter` to search the current repository by
 document name or relative path. Results appear in the document panel; `Enter`
@@ -103,9 +110,11 @@ and a download never opens another Reader automatically.
 
 The Python client stores format-1 JSON settings in
 `~/.config/mdview/config.json`, or `$XDG_CONFIG_HOME/mdview/config.json` when
-`XDG_CONFIG_HOME` is set. On the first repository-mode launch it creates the
+`XDG_CONFIG_HOME` is set. On the first Sources launch it creates the
 file with the temporary `http://ricaro.top/mdrepo/` test repository. Direct
-local-file launches do not read or create this configuration.
+local-file launches do not read or create this configuration. Every entry in
+`repositories` is available in Sources; `id` is its stable internal identifier
+and `name` is the displayed alias.
 
 ```json
 {
@@ -123,8 +132,8 @@ local-file launches do not read or create this configuration.
 }
 ```
 
-The array may contain multiple repositories, although the current TUI opens
-only its first entry. A repository `download_dir` overrides the global
+The array may contain multiple repositories, and Sources shows every entry.
+A repository `download_dir` overrides the global
 `app.default_download_dir`; if neither is set, the save prompt starts with only
 the document filename. The local `name` is the user-facing alias, while the
 name in `repository.json` remains server metadata. Admin/SFTP fields are parsed
@@ -342,19 +351,22 @@ sudo cp mdview /usr/local/bin/mdview
 mdview filename.md
 ```
 
-Запуск без имени файла открывает первый настроенный репозиторий:
+Запуск без имени файла открывает режим Sources:
 
 ```console
 mdview
 ```
 
-Repository View загружает первую запись из конфигурации, слева
-показывает каталоги, а справа — документы выбранного каталога. `Tab`
-переключает панели, `j`/`k` и стрелки выбирают элементы, `Enter` загружает
-выбранный документ в существующий Reader. В списке документов `l` также
-открывает выбранный документ. `Esc` либо `h` при активной панели оглавления
-Reader возвращает из сетевого документа в Repository View с сохранением
-текущего выбора. Клавиша `r` в Repository View повторно запрашивает
+Sources показывает системный пункт `Local`, а затем все настроенные
+репозитории. `Enter` или `l` на `Local` запрашивает абсолютный, относительный или
+начинающийся с `~` путь и открывает файл в том же Reader. Выход из такого документа
+возвращает в Sources; прямой запуск `mdview filename.md` сохраняет прежнее поведение.
+
+Для репозитория в правой панели Sources видны только каталоги первого уровня.
+Активация каталога открывает Repository View: слева дерево каталогов, справа документы.
+`j`/`k` и стрелки выбирают элементы, `h`/← движется назад или влево, `l`/→ — вперёд или
+вправо, `Tab` переключает панели, `Enter` активирует. `Esc` либо `h`/← при активном оглавлении
+Reader возвращает в родительский режим. Клавиша `r` в Repository View повторно запрашивает
 `repository.json` и обновляет каталоги и документы без перезапуска mdview.
 Клавиша `/` открывает поиск по имени документа и его относительному
 пути в текущем репозитории. `Enter` или `l` открывает выбранный результат,
@@ -373,7 +385,7 @@ Markdown в локальный файл. В поле сразу предложе
 `http://ricaro.top/mdrepo/`. Запуск локального файла конфигурацию не читает и не создаёт.
 
 Формат JSON совпадает с приведённым выше английским примером. Массив `repositories`
-уже поддерживает несколько записей, но TUI пока открывает только первую. Поле
+поддерживает несколько записей, и все они показываются в Sources. Поле
 репозитория `download_dir` имеет приоритет над `app.default_download_dir`; если оба пути
 не заданы, диалог предлагает только имя файла. Локальное `name` считается alias,
 а серверное имя остаётся метаданными. Admin/SFTP-поля загружаются и сохраняются, но

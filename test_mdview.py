@@ -195,16 +195,13 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(mdview.ConfigError, "secrets"):
             mdview.parse_settings_json(self._source([repository]))
 
-    def test_repository_mode_uses_first_configured_url(self) -> None:
+    def test_repository_mode_starts_sources_without_eager_network_access(self) -> None:
         settings = mdview.parse_settings_json(self._source())
-        repository = mdview.Repository("Server name", (), ())
         with patch.object(mdview, "load_settings", return_value=settings):
-            with patch.object(
-                mdview, "load_repository", return_value=repository
-            ) as load_repository:
+            with patch.object(mdview, "load_repository") as load_repository:
                 with patch.object(mdview.curses, "wrapper"):
                     self.assertEqual(mdview.main([]), 0)
-        load_repository.assert_called_once_with("https://example.test/docs/")
+        load_repository.assert_not_called()
 
     def test_local_reader_does_not_load_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -214,6 +211,155 @@ class SettingsTests(unittest.TestCase):
                 with patch.object(mdview.curses, "wrapper"):
                     self.assertEqual(mdview.main([str(document)]), 0)
             load_settings.assert_not_called()
+
+
+class SourcesViewTests(unittest.TestCase):
+    """Verify Sources, Local, and Repository transitions through real input loops."""
+
+    @staticmethod
+    def _settings() -> object:
+        return mdview.Settings(
+            1,
+            TEST_APP_SETTINGS,
+            (
+                test_repository_settings(),
+                mdview.RepositorySettings(
+                    id="second",
+                    name="Second Repository",
+                    url="https://second.example/repo/",
+                    download_dir=None,
+                    admin=mdview.AdminSettings(enabled=False),
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _repository() -> object:
+        nested = mdview.RepositoryDirectory("nested", ("one", "nested"), (), ())
+        return mdview.Repository(
+            "Server",
+            (
+                mdview.RepositoryDirectory("one", ("one",), (nested,), ()),
+                mdview.RepositoryDirectory("two", ("two",), (), ()),
+            ),
+        )
+
+    def test_sources_contain_local_and_all_configured_repositories(self) -> None:
+        view = mdview.SourcesView(FakeScreen(), self._settings())
+        self.assertEqual(
+            view._source_names(),
+            ["Local", "Test Repository", "Second Repository"],
+        )
+
+    def test_selected_repository_shows_only_first_level_folders(self) -> None:
+        view = mdview.SourcesView(FakeScreen(), self._settings())
+        view.source_selected = 1
+        with patch.object(mdview, "load_repository", return_value=self._repository()):
+            view._ensure_selected_repository()
+        self.assertEqual([folder.name for folder in view._folders()], ["one", "two"])
+
+    def test_enter_and_l_on_local_use_same_reader_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "local.md"
+            document.write_text("# Local", encoding="utf-8")
+            for activation in ("\n", "l"):
+                with self.subTest(activation=activation):
+                    screen = FakeInteractiveScreen(
+                        [activation, *str(document), "\n", "Q"]
+                    )
+                    view = mdview.SourcesView(screen, self._settings())
+                    with patch.object(mdview, "Viewer") as viewer:
+                        viewer.return_value.run.return_value = "back"
+                        with patch.object(mdview.curses, "curs_set"):
+                            self.assertEqual(view.run(), "quit")
+                    viewer.assert_called_once_with(
+                        screen,
+                        document,
+                        ["# Local"],
+                        return_on_escape=True,
+                    )
+
+    def test_local_reader_back_returns_to_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "local.md"
+            document.write_text("text", encoding="utf-8")
+            view = mdview.SourcesView(
+                FakeInteractiveScreen(["\n", *str(document), "\n", "Q"]),
+                self._settings(),
+            )
+            with patch.object(mdview, "Viewer") as viewer:
+                viewer.return_value.run.return_value = "back"
+                with patch.object(mdview.curses, "curs_set"):
+                    self.assertEqual(view.run(), "quit")
+            self.assertEqual(view.source_selected, 0)
+            self.assertIsNone(view.local_path_input)
+
+    def test_missing_local_file_keeps_local_selected(self) -> None:
+        view = mdview.SourcesView(
+            FakeInteractiveScreen(["\n", *"missing.md", "\n", "Q"]),
+            self._settings(),
+        )
+        with patch.object(mdview.curses, "curs_set"):
+            self.assertEqual(view.run(), "quit")
+        self.assertEqual(view.source_selected, 0)
+        self.assertIn("file does not exist", view.message)
+
+    def test_escape_cancels_local_path_input(self) -> None:
+        view = mdview.SourcesView(
+            FakeInteractiveScreen(["l", "\x1b", "Q"]), self._settings()
+        )
+        with patch.object(mdview, "Viewer") as viewer:
+            with patch.object(mdview.curses, "curs_set"):
+                self.assertEqual(view.run(), "quit")
+        viewer.assert_not_called()
+        self.assertIsNone(view.local_path_input)
+        self.assertEqual(view.source_selected, 0)
+
+    def test_sources_enter_repository_at_selected_top_folder(self) -> None:
+        repository = self._repository()
+        view = mdview.SourcesView(
+            FakeInteractiveScreen(["j", "l", "j", "\n", "Q"]),
+            self._settings(),
+        )
+        with patch.object(mdview, "load_repository", return_value=repository):
+            with patch.object(mdview, "RepositoryView") as repository_view:
+                repository_view.return_value.run.return_value = "back"
+                repository_view.return_value.repository = repository
+                with patch.object(mdview.curses, "curs_set"):
+                    self.assertEqual(view.run(), "quit")
+        repository_view.assert_called_once_with(
+            view.screen,
+            TEST_APP_SETTINGS,
+            self._settings().repositories[0],
+            repository,
+            initial_directory_path=("two",),
+        )
+
+    def test_repository_h_and_left_return_to_sources(self) -> None:
+        for key in ("h", mdview.curses.KEY_LEFT):
+            with self.subTest(key=key):
+                view = mdview.RepositoryView(
+                    FakeInteractiveScreen([key]),
+                    TEST_APP_SETTINGS,
+                    test_repository_settings(),
+                    self._repository(),
+                )
+                with patch.object(mdview.curses, "curs_set"):
+                    self.assertEqual(view.run(), "back")
+
+    def test_direct_local_argv_reader_remains_root_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "local.md"
+            document.write_text("# Root", encoding="utf-8")
+            screen = FakeScreen()
+            with patch.object(mdview, "load_settings") as load_settings:
+                with patch.object(mdview, "Viewer") as viewer:
+                    with patch.object(
+                        mdview.curses, "wrapper", side_effect=lambda callback: callback(screen)
+                    ):
+                        self.assertEqual(mdview.main([str(document)]), 0)
+            load_settings.assert_not_called()
+            viewer.assert_called_once_with(screen, document, ["# Root"])
 
 
 class FakeScreen:
@@ -1082,7 +1228,7 @@ class NavigationStateTests(unittest.TestCase):
 
     def test_lowercase_h_returns_from_remote_reader_toc_like_escape(self) -> None:
         outcomes: list[str] = []
-        for key in ("h", "\x1b"):
+        for key in ("h", mdview.curses.KEY_LEFT, "\x1b"):
             viewer = mdview.Viewer(
                 FakeInteractiveScreen([key]),
                 Path("remote.md"),
@@ -1092,7 +1238,7 @@ class NavigationStateTests(unittest.TestCase):
             viewer.active_panel = "toc"
             with patch.object(mdview.curses, "curs_set"):
                 outcomes.append(viewer.run())
-        self.assertEqual(outcomes, ["back", "back"])
+        self.assertEqual(outcomes, ["back", "back", "back"])
 
         for return_on_escape, active_panel in ((True, "document"), (False, "toc")):
             viewer = mdview.Viewer(
