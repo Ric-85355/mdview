@@ -2,8 +2,8 @@
 /*
  * repository.php — created 2026-08-30, version 0.3.0.
  * Purpose: generate a read-only Markdown repository index on shared hosting.
- * Algorithm: validate local metadata, recursively collect .md files through
- * two directory levels, sort them, and emit UTF-8 JSON with the newest mtime.
+ * Algorithm: validate local metadata, recursively collect directories and .md
+ * files through two levels, sort them, and emit UTF-8 JSON with newest mtime.
  */
 
 declare(strict_types=1);
@@ -107,18 +107,16 @@ function scan_repository_directory(
                 continue;
             }
             $child = scan_repository_directory($root, $relativePath, $depth + 1);
-            if ($child['items'] !== []) {
-                $directories[] = [
-                    'type' => 'directory',
-                    'name' => $entry,
-                    'items' => $child['items'],
-                ];
-                $updated = max(
-                    $updated,
-                    $child['updated'],
-                    repository_mtime($absolutePath)
-                );
-            }
+            $directories[] = [
+                'type' => 'directory',
+                'name' => $entry,
+                'items' => $child['items'],
+            ];
+            $updated = max(
+                $updated,
+                $child['updated'],
+                repository_mtime($absolutePath)
+            );
             continue;
         }
 

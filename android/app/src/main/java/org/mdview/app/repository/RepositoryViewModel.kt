@@ -22,7 +22,15 @@ import org.mdview.app.settings.RepositorySettingsStore
 
 enum class AppScreen { Repository, Reader, Settings }
 
-enum class RepositoryOperation { Idle, Loading, Uploading, Refreshing }
+enum class RepositoryOperation(val progressText: String?) {
+    Idle(null),
+    Loading("Loading…"),
+    Uploading("Uploading…"),
+    CreatingFolder("Creating folder…"),
+    Renaming("Renaming…"),
+    Deleting("Deleting…"),
+    Refreshing("Refreshing…"),
+}
 
 class RepositoryViewModel(
     application: Application,
@@ -55,6 +63,15 @@ class RepositoryViewModel(
 
     val canUpload: Boolean
         get() = settings.sftpEnabled && operation == RepositoryOperation.Idle
+
+    val canManage: Boolean
+        get() = settings.sftpEnabled && operation == RepositoryOperation.Idle
+
+    val canCreateFolder: Boolean
+        get() {
+            val depth = if (currentDirectoryPath.isEmpty()) 0 else currentDirectoryPath.count { it == '/' } + 1
+            return canManage && depth < 2
+        }
 
     init {
         if (settings.repositoryUrl.isNotBlank()) refresh()
@@ -183,7 +200,7 @@ class RepositoryViewModel(
                         refreshNow(
                             operationWhileLoading = RepositoryOperation.Refreshing,
                             successMessage = UploadOutcomeText.afterRefresh(true),
-                            uploadAlreadyCompleted = true,
+                            refreshFailureMessage = UploadOutcomeText.afterRefresh(false),
                         )
                     }
                 }
@@ -194,10 +211,103 @@ class RepositoryViewModel(
         }
     }
 
+    fun createFolder(name: String) {
+        mutateRepository(
+            operationWhileRunning = RepositoryOperation.CreatingFolder,
+            completedMessage = "Folder created",
+            failurePrefix = "Could not create folder",
+            alreadyExistsMessage = "Folder already exists",
+        ) { credentials ->
+            uploader.createFolder(settings, credentials, currentDirectoryPath, name)
+        }
+    }
+
+    fun renameDocument(document: RepositoryDocument, newName: String) {
+        val oldName = document.path.substringAfterLast('/')
+        mutateRepository(
+            operationWhileRunning = RepositoryOperation.Renaming,
+            completedMessage = "File renamed",
+            failurePrefix = "Could not rename file",
+            alreadyExistsMessage = "File already exists",
+        ) { credentials ->
+            uploader.renameDocument(settings, credentials, currentDirectoryPath, oldName, newName)
+        }
+    }
+
+    fun renameFolder(directory: RepositoryDirectory, newName: String) {
+        mutateRepository(
+            operationWhileRunning = RepositoryOperation.Renaming,
+            completedMessage = "Folder renamed",
+            failurePrefix = "Could not rename folder",
+            alreadyExistsMessage = "Folder already exists",
+        ) { credentials ->
+            uploader.renameFolder(settings, credentials, currentDirectoryPath, directory.name, newName)
+        }
+    }
+
+    fun deleteDocument(document: RepositoryDocument) {
+        val fileName = document.path.substringAfterLast('/')
+        mutateRepository(
+            operationWhileRunning = RepositoryOperation.Deleting,
+            completedMessage = "File deleted",
+            failurePrefix = "Could not delete file",
+            alreadyExistsMessage = "File already exists",
+        ) { credentials ->
+            uploader.deleteDocument(settings, credentials, currentDirectoryPath, fileName)
+        }
+    }
+
+    fun deleteFolder(directory: RepositoryDirectory) {
+        mutateRepository(
+            operationWhileRunning = RepositoryOperation.Deleting,
+            completedMessage = "Folder deleted",
+            failurePrefix = "Could not delete folder",
+            alreadyExistsMessage = "Folder already exists",
+        ) { credentials ->
+            uploader.deleteEmptyFolder(settings, credentials, currentDirectoryPath, directory.name)
+        }
+    }
+
+    private fun mutateRepository(
+        operationWhileRunning: RepositoryOperation,
+        completedMessage: String,
+        failurePrefix: String,
+        alreadyExistsMessage: String,
+        mutation: suspend (RepositoryCredentials) -> RepositoryMutationResult,
+    ) {
+        if (operation != RepositoryOperation.Idle) return
+        operation = operationWhileRunning
+        message = operationWhileRunning.progressText
+        viewModelScope.launch {
+            runCatching { mutation(settingsStore.credentials()) }
+                .onSuccess { result ->
+                    when (result) {
+                        RepositoryMutationResult.AlreadyExists -> {
+                            operation = RepositoryOperation.Idle
+                            message = alreadyExistsMessage
+                        }
+                        RepositoryMutationResult.FolderNotEmpty -> {
+                            operation = RepositoryOperation.Idle
+                            message = "Folder is not empty"
+                        }
+                        RepositoryMutationResult.Completed -> refreshNow(
+                            operationWhileLoading = RepositoryOperation.Refreshing,
+                            successMessage = RepositoryMutationOutcomeText.afterRefresh(completedMessage, true),
+                            refreshFailureMessage = RepositoryMutationOutcomeText.afterRefresh(completedMessage, false),
+                        )
+                    }
+                }
+                .onFailure {
+                    operation = RepositoryOperation.Idle
+                    message = userMessage(failurePrefix, it)
+                }
+        }
+    }
+
     private suspend fun refreshNow(
         operationWhileLoading: RepositoryOperation,
         successMessage: String?,
-        uploadAlreadyCompleted: Boolean = false,
+        refreshFailureMessage: String? = null,
     ) {
         operation = operationWhileLoading
         message = if (operationWhileLoading == RepositoryOperation.Refreshing) "Refreshing…" else null
@@ -210,11 +320,7 @@ class RepositoryViewModel(
                 message = successMessage
             }
             .onFailure {
-                message = if (uploadAlreadyCompleted) {
-                    UploadOutcomeText.afterRefresh(false)
-                } else {
-                    userMessage("Repository refresh failed", it)
-                }
+                message = refreshFailureMessage ?: userMessage("Repository refresh failed", it)
             }
         operation = RepositoryOperation.Idle
     }

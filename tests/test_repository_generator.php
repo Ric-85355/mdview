@@ -3,7 +3,7 @@
  * test_repository_generator.php — created 2026-08-30, version 0.3.0.
  * Purpose: regression-test the dynamic repository index without a web server.
  * Algorithm: create a temporary mixed filesystem, invoke generator functions,
- * validate sorting/depth/UTF-8/errors, and remove only that temporary tree.
+ * validate empty directories/sorting/depth/UTF-8/errors, then remove the fixture.
  */
 
 declare(strict_types=1);
@@ -72,9 +72,15 @@ try {
     write_repository_fixture($root, 'root.md', '# Root');
     write_repository_fixture($root, 'Alpha.md', '# Alpha');
     write_repository_fixture($root, 'archive.zip', 'ignored');
+    if (!mkdir($root . DIRECTORY_SEPARATOR . 'empty', 0700)) {
+        throw new RuntimeException('Could not create empty root directory');
+    }
     write_repository_fixture($root, 'hardware/raymarine.md', '# Raymarine');
     write_repository_fixture($root, 'hardware/MikroTik.md', '# MikroTik');
     write_repository_fixture($root, 'hardware/diagram.png', 'ignored');
+    if (!mkdir($root . DIRECTORY_SEPARATOR . 'hardware' . DIRECTORY_SEPARATOR . 'empty', 0700)) {
+        throw new RuntimeException('Could not create empty second-level directory');
+    }
     write_repository_fixture($root, 'linux/network.md', '# Network');
     write_repository_fixture($root, 'linux/advanced/routing.md', '# Routing');
     write_repository_fixture($root, 'linux/advanced/сеть.md', '# Сеть');
@@ -108,18 +114,28 @@ try {
 
     $rootNames = array_column($index['items'], 'name');
     assert_repository_test(
-        $rootNames === ['hardware', 'linux', 'Alpha', 'root'],
+        $rootNames === ['empty', 'hardware', 'linux', 'src', 'Alpha', 'root'],
         'root directories and documents are not stably sorted'
     );
-    assert_repository_test(!in_array('src', $rootNames, true), 'empty source directory leaked');
     assert_repository_test(!in_array('archive', $rootNames, true), 'non-Markdown file leaked');
 
-    $hardware = $index['items'][0];
+    $empty = $index['items'][0];
     assert_repository_test(
-        array_column($hardware['items'], 'name') === ['MikroTik', 'raymarine'],
-        'documents are not sorted case-insensitively'
+        $empty['type'] === 'directory' && $empty['items'] === [],
+        'empty first-level directory missing or not represented by empty items'
     );
-    $advanced = $index['items'][1]['items'][0];
+
+    $hardware = $index['items'][1];
+    assert_repository_test(
+        array_column($hardware['items'], 'name') === ['empty', 'MikroTik', 'raymarine'],
+        'empty subdirectory and sibling documents are not sorted correctly'
+    );
+    assert_repository_test(
+        $hardware['items'][0]['type'] === 'directory'
+            && $hardware['items'][0]['items'] === [],
+        'empty second-level directory missing'
+    );
+    $advanced = $index['items'][2]['items'][0];
     assert_repository_test($advanced['name'] === 'advanced', 'second-level directory missing');
     assert_repository_test(
         array_column($advanced['items'], 'name') === ['routing', 'сеть'],
@@ -128,6 +144,11 @@ try {
     assert_repository_test(
         !in_array('deeper', array_column($advanced['items'], 'name'), true),
         'content deeper than two directory levels leaked'
+    );
+    $src = $index['items'][3];
+    assert_repository_test(
+        $src['type'] === 'directory' && $src['items'] === [],
+        'directory containing only a non-Markdown file must remain visible'
     );
 
     $encoded = json_encode($index, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);

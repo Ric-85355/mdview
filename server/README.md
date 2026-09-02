@@ -20,13 +20,14 @@ curl -i http://ricaro.top/mdrepo/repository.json
 
 A successful response has status `200`, content type
 `application/json; charset=utf-8`, format `1`, read-only capabilities, and an
-`items` tree generated from `.md` files. Direct URLs such as
+`items` tree generated from directories and `.md` files. Empty first- and
+second-level directories are represented with `"items": []`. Direct URLs such as
 `http://ricaro.top/mdrepo/hardware/mikrotik.md` continue to work.
 
 Missing or invalid metadata, including a missing non-empty `name`, produces an
 HTTP `500` JSON error. `description` is optional. Symlinks, non-Markdown files,
-empty/non-document directories, and content below the second directory level
-are not indexed.
+and content below the second directory level are not indexed; a directory that
+contains only ignored files is still included as an empty Repository directory.
 
 Run the deterministic local checks from the project root:
 

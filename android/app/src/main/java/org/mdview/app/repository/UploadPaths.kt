@@ -1,8 +1,8 @@
 /*
  * UploadPaths.kt — created 2026-09-01, version 0.1.0.
- * Purpose: validate local Markdown names and build confined SFTP destinations.
+ * Purpose: validate repository object names and build confined SFTP destinations.
  * Algorithm: accept one safe basename, normalize repository/root segments,
- * then join only these trusted components using POSIX separators.
+ * join trusted components, and expose testable mutation decisions.
  */
 
 package org.mdview.app.repository
@@ -34,7 +34,7 @@ object UploadPaths {
             .let { if (safeRoot.startsWith('/')) "/${it.trimStart('/')}" else it }
     }
 
-    private fun normalizeSftpRoot(root: String): String {
+    internal fun normalizeSftpRoot(root: String): String {
         val normalized = root.trim().replace('\\', '/').trimEnd('/')
         require(normalized.isNotEmpty()) { "SFTP root is required" }
         val absolute = normalized.startsWith('/')
@@ -43,6 +43,62 @@ object UploadPaths {
         val joined = parts.joinToString("/")
         return if (absolute) "/$joined" else joined
     }
+}
+
+object RepositoryMutationPaths {
+    fun safeFolderName(name: String): String = safeObjectName(name)
+
+    fun safeDocumentName(name: String): String = UploadPaths.safeFileName(name)
+
+    fun newFolderPath(root: String, repositoryDirectory: String, folderName: String): String {
+        val safeDirectory = RepositoryPaths.normalizeRelativeDirectory(repositoryDirectory)
+        val depth = if (safeDirectory.isEmpty()) 0 else safeDirectory.count { it == '/' } + 1
+        require(depth < 2) {
+            "Repository supports at most two directory levels"
+        }
+        return objectPath(root, safeDirectory, safeFolderName(folderName))
+    }
+
+    fun objectPath(root: String, repositoryDirectory: String, objectName: String): String {
+        val safeName = safeObjectName(objectName)
+        val safeDirectory = RepositoryPaths.normalizeRelativeDirectory(repositoryDirectory)
+        val safeRoot = UploadPaths.normalizeSftpRoot(root)
+        return listOf(safeRoot, safeDirectory, safeName)
+            .filter { it.isNotEmpty() }
+            .joinToString("/")
+            .let { if (safeRoot.startsWith('/')) "/${it.trimStart('/')}" else it }
+    }
+
+    private fun safeObjectName(name: String): String {
+        val trimmed = name.trim()
+        require(
+            trimmed.isNotEmpty() &&
+                trimmed != "." &&
+                trimmed != ".." &&
+                '/' !in trimmed &&
+                '\\' !in trimmed,
+        ) { "Enter one safe name without path separators" }
+        return trimmed
+    }
+}
+
+enum class RepositoryMutationResult {
+    Completed,
+    AlreadyExists,
+    FolderNotEmpty,
+}
+
+object RepositoryMutationRules {
+    fun collisionResult(targetExists: Boolean): RepositoryMutationResult? =
+        if (targetExists) RepositoryMutationResult.AlreadyExists else null
+
+    fun folderDeleteResult(hasChildren: Boolean): RepositoryMutationResult =
+        if (hasChildren) RepositoryMutationResult.FolderNotEmpty else RepositoryMutationResult.Completed
+}
+
+object RepositoryMutationOutcomeText {
+    fun afterRefresh(completedMessage: String, refreshSucceeded: Boolean): String =
+        if (refreshSucceeded) completedMessage else "$completedMessage, repository refresh failed"
 }
 
 object UploadOutcomeText {

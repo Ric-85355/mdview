@@ -143,7 +143,7 @@ Passwords, private keys, passphrases, and tokens must not be stored in this file
 ### Dynamic Repository Server
 
 The shared-hosting deployment bundle is in `server/mdrepo/`. Its PHP generator
-builds format-1 `repository.json` from the actual `.md` files, using
+builds format-1 `repository.json` from the actual directories and `.md` files, using
 `repository.meta.json` for the repository name and optional description. See
 `server/README.md` for Hostinger deployment and verification instructions.
 
@@ -268,13 +268,20 @@ Repository View is a single file-browser list: `..` first outside the root,
 then child folders, then Markdown documents. Tapping a folder replaces the list
 with that folder's contents; tapping a document opens the existing Reader.
 Refresh retains the current relative path or falls back to its nearest existing
-parent. If SFTP is enabled, Upload launches the Android picker and
+parent. The compact top-bar Menu contains Refresh, Upload, New folder, and
+Settings. Long-pressing a folder or document opens only Rename and Delete;
+folder deletion is restricted to empty folders. If SFTP is enabled, Upload launches the Android picker and
 accepts a case-insensitive `.md` filename. The file is sent directly to the
 currently open repository folder; no destination picker is shown. Existing
 remote files require confirmation. A successful transfer is followed by an
 automatic HTTP refresh while retaining the folder. If only refresh fails, the
 UI reports that upload completed. SFTP uses `com.github.mwiede:jsch:0.2.26` and
 trust-on-first-use host-key storage; a changed known key is rejected.
+All mutation names are validated as single path segments and cannot escape the
+configured SFTP root. Copy, move, recursive delete, and multi-selection are not
+implemented. The bundled PHP index includes empty first- and second-level
+directories, so New folder becomes visible immediately after Refresh without a
+placeholder file.
 
 The first version renders headings, paragraphs, bullet and numbered lists,
 bold, italic, inline code, fenced code blocks, and links. It provides an
@@ -416,7 +423,7 @@ SFTP и Settings UI ещё не реализованы. Пароли, прива
 ### Динамический сервер репозитория
 
 Deploy-комплект для shared hosting находится в `server/mdrepo/`. PHP-генератор
-формирует `repository.json` формата 1 из фактических `.md`-файлов, а имя и
+формирует `repository.json` формата 1 из фактических каталогов и `.md`-файлов, а имя и
 необязательное описание берёт из `repository.meta.json`. Инструкции загрузки
 на Hostinger и проверки находятся в `server/README.md`.
 
@@ -537,11 +544,17 @@ Repository View использует единый файловый список:
 `..`, затем дочерние каталоги, затем Markdown-документы. Tap по каталогу открывает
 его, tap по документу запускает существующий Reader. Breadcrumbs и двухколоночного
 режима нет. Refresh сохраняет текущий relative path или выбирает ближайшего
-существующего родителя.
+существующего родителя. В компактном верхнем Menu находятся Refresh, Upload,
+New folder и Settings. Long press по каталогу или документу открывает только
+Rename и Delete; удалить можно только пустой каталог.
 Upload выбирает `.md` через Android picker и загружает его по SFTP строго в текущую
 папку, с подтверждением замены и автоматическим Refresh. Используется
 `com.github.mwiede:jsch:0.2.26`; первый SSH host key сохраняется по TOFU, а его смена
 отклоняется.
+Имена всех SFTP-операций валидируются как один path segment и не могут выйти за
+пределы `sftp_root`. Copy, Move, recursive delete и multi-select не реализованы.
+Комплектный PHP-индекс включает пустые каталоги первого и второго уровня, поэтому
+New folder виден сразу после Refresh без служебного placeholder-файла.
 
 Первая версия отображает заголовки, абзацы, маркированные и нумерованные
 списки, bold, italic, inline code, fenced code blocks и ссылки. Есть отдельная

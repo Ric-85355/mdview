@@ -133,6 +133,15 @@ Format-1 parser поддерживает документы и каталоги
 точную папку по сохранённому relative path или возвращается к ближайшему
 существующему родителю; ошибка не уничтожает старый индекс.
 
+Верхняя панель Repository содержит alias и единый Menu: Refresh, Upload,
+New folder, Settings. New folder создаёт один безопасный дочерний каталог через
+SFTP. Long press по каталогу или документу открывает компактное Rename/Delete;
+для `..` контекстного меню нет. Rename не меняет parent и не перезаписывает
+существующий target. Документ остаётся case-insensitive `.md`; каталог принимает
+только один непустой basename. Удаление файла требует подтверждения, а каталог
+удаляется только после SFTP-проверки пустоты. Recursive delete, copy/move,
+multi-select и редактор файлов не реализованы.
+
 Settings хранит `name`, `repository_url`, HTTP user и SFTP enabled/host/port/user/root
 в private SharedPreferences. HTTP/SFTP passwords хранятся только как AES/GCM ciphertext;
 неэкспортируемый AES-256 key создаётся в Android Keystore. Пароли не показываются
@@ -150,8 +159,18 @@ Upload использует Android `OpenDocument`, `ContentResolver` и `Openab
 подтверждения. После успеха SFTP закрывается и выполняется HTTP Refresh с тем же
 путём. Ошибка Refresh после upload показывает отдельный успешный результат Upload.
 
+Все новые mutation paths строятся только из нормализованных `sftp_root`, текущего
+repository-relative path и проверенного basename; separators, `.`/`..` и выход за
+root отклоняются до соединения. mkdir/rename/rm/rmdir используют тот же короткий
+SFTP lifecycle и после успеха запускают Refresh, сохраняя current path. Ошибка
+Refresh не подменяет успешный результат mutation. Комплектный PHP-генератор
+включает пустые каталоги первого и второго уровня как directory с `items: []`,
+поэтому цепочка New folder → Refresh → открыть папку → Upload работает без
+placeholder-файлов.
+
 Ограничения этапа: один репозиторий, нет Sources, repository search, offline cache,
-delete/mkdir/rename/move, SFTP key auth, ручной fingerprint verification и Share-to-upload.
+copy/move, recursive delete, multi-select, SFTP key auth, ручной fingerprint
+verification и Share-to-upload.
 
 ## Текущий статус
 
@@ -222,9 +241,10 @@ alias имеет приоритет для title, серверное имя ос
 
 В `server/mdrepo/` реализован deploy-комплект динамического format-1 индекса
 для Hostinger/shared hosting: `repository.php`, локальный `.htaccess` и
-`repository.meta.json`. Источник истины — `.md`-файлы в корне и не более чем
-двух уровнях каталогов. Symlink, прочие типы файлов, пустые каталоги и более
-глубокое содержимое игнорируются. Каталоги и документы стабильно сортируются;
+`repository.meta.json`. Источник истины — фактические каталоги и `.md`-файлы в
+корне и не более чем на двух уровнях. Пустые каталоги обоих уровней включаются с пустым `items`;
+каталог только с файлами не `.md` также остаётся видимым, но сами такие файлы,
+symlink и более глубокое содержимое игнорируются. Каталоги и документы стабильно сортируются;
 `updated` берётся из максимального mtime метаданных и включённого содержимого.
 Ошибки дают HTTP 500 с кратким JSON, подробность остаётся только в server log.
 Локальные PHP lint, unit fixture и HTTP smoke-test выполнены. Файлы ещё не

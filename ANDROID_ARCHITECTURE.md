@@ -600,6 +600,12 @@ Repository View — однооконный файловый браузер бе�
 `SavedStateHandle`. Refresh заново находит точную папку по этому пути или ближайшего
 существующего родителя; при ошибке старый индекс остаётся доступен.
 
+Верхняя панель Repository оставляет alias источника и одно Menu с командами
+Refresh, Upload, New folder и Settings. Long press по дочернему каталогу или
+Markdown-документу открывает контекстное меню Rename/Delete; строка `..` не имеет
+контекстных действий. Операции сериализуются тем же состоянием ViewModel, поэтому
+повторный быстрый tap не запускает второе SFTP-соединение.
+
 ### 25.2. Settings и HTTP
 
 Несекретные поля одного репозитория хранятся в private SharedPreferences:
@@ -640,8 +646,19 @@ repository-relative path и безопасного basename. Существов�
 HTTPS с восстановлением той же папки. Ошибка этого Refresh не меняет успешный
 результат Upload и показывается как `Upload completed, repository refresh failed`.
 
+Тот же краткоживущий SFTP-сеанс используется для `mkdir`, rename, удаления файла
+и `rmdir`. Имена trim-ятся и принимаются только как один безопасный basename;
+destination всегда строится из `sftp_root`, текущего repository-relative path и
+проверенного имени. Rename не перезаписывает существующий target. Перед `rmdir`
+содержимое проверяется непосредственно по SFTP, и непустой каталог не удаляется.
+После успешной операции выполняется Refresh с сохранением текущего relative path;
+успех операции и ошибка последующего Refresh сообщаются раздельно.
+
 ### 25.5. Ограничения среза
 
 Пока нет нескольких репозиториев, Sources, repository search, offline cache,
-delete/mkdir/rename/move, key-based SFTP auth, ручной проверки host-key fingerprint,
-Share-to-upload и фоновой синхронизации. Reader остаётся read-only.
+copy/move, recursive delete, multi-select, key-based SFTP auth, ручной проверки
+host-key fingerprint, Share-to-upload и фоновой синхронизации. Reader остаётся
+read-only. Комплектный `server/mdrepo/repository.php` включает пустые каталоги
+первого и второго уровня, поэтому New folder появляется после Refresh без
+placeholder-файлов.
