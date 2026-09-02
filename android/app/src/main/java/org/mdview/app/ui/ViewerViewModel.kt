@@ -128,7 +128,7 @@ class ViewerViewModel(
     }
 
     fun cycleTocDepth() {
-        tocDepth = tocDepth % 3 + 1
+        tocDepth = ReaderToolbarModel.nextTocDepth(tocDepth)
         savedStateHandle["tocDepth"] = tocDepth
         synchronizeCurrentSection()
     }

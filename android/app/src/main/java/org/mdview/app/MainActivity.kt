@@ -72,8 +72,7 @@ class MainActivity : ComponentActivity() {
                 AppScreen.Reader -> MdviewApp(
                     viewModel = viewer,
                     onOpenDocument = { picker.launch(arrayOf("text/markdown", "text/plain")) },
-                    onRepository = repository::showRepository,
-                    onSettings = repository::showSettings,
+                    onBack = repository::showRepository,
                 )
                 AppScreen.Settings -> SettingsScreen(
                     viewModel = repository,

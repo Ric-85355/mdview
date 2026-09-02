@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -33,12 +32,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -66,11 +66,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import org.mdview.app.BuildConfig
 import org.mdview.app.R
 import org.mdview.app.markdown.InlineContent
 import org.mdview.app.markdown.InlineStyle
@@ -84,13 +84,11 @@ import org.mdview.app.markdown.SearchMatch
 fun MdviewApp(
     viewModel: ViewerViewModel,
     onOpenDocument: () -> Unit,
-    onRepository: () -> Unit,
-    onSettings: () -> Unit,
+    onBack: () -> Unit,
 ) {
     MdviewTheme {
         val listState = rememberLazyListState()
         val scope = rememberCoroutineScope()
-        var aboutOpen by remember { mutableStateOf(false) }
         val document = viewModel.document
         val navigateToBlock: (Int) -> Unit = { blockIndex ->
             viewModel.onDocumentPosition(blockIndex)
@@ -111,17 +109,17 @@ fun MdviewApp(
         Scaffold(
             topBar = {
                 ReaderTopBar(
+                    documentTitle = document?.title ?: "No document",
                     depth = viewModel.tocDepth,
                     tocOpen = viewModel.tocOpen,
-                    onOpenDocument = onOpenDocument,
-                    onRepository = onRepository,
-                    onSettings = onSettings,
+                    onBack = onBack,
                     onTocAction = {
-                        if (viewModel.tocOpen) viewModel.cycleTocDepth()
-                        else viewModel.updateTocOpen(true)
+                        when (ReaderToolbarModel.tocAction(viewModel.tocOpen)) {
+                            ReaderToolbarModel.TocAction.Open -> viewModel.updateTocOpen(true)
+                            ReaderToolbarModel.TocAction.CycleDepth -> viewModel.cycleTocDepth()
+                        }
                     },
                     onSearch = viewModel::openSearch,
-                    onAbout = { aboutOpen = true },
                 )
             },
         ) { padding ->
@@ -151,83 +149,43 @@ fun MdviewApp(
                 AdBannerPlaceholder()
             }
         }
-        if (aboutOpen) {
-            AlertDialog(
-                onDismissRequest = { aboutOpen = false },
-                confirmButton = {
-                    TextButton(onClick = { aboutOpen = false }) { Text("OK") }
-                },
-                title = { Text("mdview") },
-                text = { Text("Read-only Markdown viewer for Android ${BuildConfig.VERSION_NAME}") },
-            )
-        }
     }
 }
 
 @Composable
 private fun ReaderTopBar(
+    documentTitle: String,
     depth: Int,
     tocOpen: Boolean,
-    onOpenDocument: () -> Unit,
-    onRepository: () -> Unit,
-    onSettings: () -> Unit,
+    onBack: () -> Unit,
     onTocAction: () -> Unit,
     onSearch: () -> Unit,
-    onAbout: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
     Surface(tonalElevation = 3.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            Box {
-                TextButton(onClick = { menuOpen = true }) {
-                    Text("☰", fontSize = 24.sp)
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Repository") },
-                        onClick = { menuOpen = false; onRepository() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Open file") },
-                        onClick = { menuOpen = false; onOpenDocument() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Settings") },
-                        onClick = { menuOpen = false; onSettings() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("About") },
-                        onClick = { menuOpen = false; onAbout() },
-                    )
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    TextButton(onClick = onTocAction) {
+                        Text(ReaderToolbarModel.tocLabel(tocOpen, depth))
+                    }
+                }
+                IconButton(onClick = onSearch) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search")
                 }
             }
-            TocButton(depth = depth, tocOpen = tocOpen, onClick = onTocAction)
-            TextButton(onClick = onSearch) { Text("⌕", fontSize = 26.sp) }
-        }
-    }
-}
-
-@Composable
-private fun TocButton(depth: Int, tocOpen: Boolean, onClick: () -> Unit) {
-    Box {
-        TextButton(onClick = onClick) {
-            Text("☷", fontSize = 22.sp)
-        }
-        Surface(
-            modifier = Modifier.size(18.dp).align(Alignment.TopEnd),
-            shape = CircleShape,
-            color = if (tocOpen) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.secondary,
-            contentColor = if (tocOpen) MaterialTheme.colorScheme.onPrimary
-            else MaterialTheme.colorScheme.onSecondary,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(depth.toString(), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
+            Text(
+                documentTitle,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
