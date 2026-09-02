@@ -224,8 +224,9 @@ python3 -m py_compile mdview test_mdview.py
 
 The C implementation lives alongside the Python implementation. It uses
 `ncursesw` and wide-character input/output and builds as `build/mdview-c`.
-Both implementations provide the same local Reader behavior. Repository View
-is currently available only in the Python implementation.
+Both TUI implementations provide the same local Reader behavior. Network
+Repository View is not implemented in C; it is available independently in the
+Python and Android applications.
 
 Install a C compiler, `pkg-config`, and the ncurses wide-character development
 package (for example, `libncursesw5-dev` on Debian/Ubuntu), then build and test:
@@ -250,11 +251,30 @@ and a UTF-8 pseudo-terminal smoke test.
 
 ### Android Version
 
-The independent experimental Android application is in `android/`. It targets
+The independent Android application is in `android/`. It targets
 Android 9 (API 28) and newer and uses Kotlin, Jetpack Compose, and standard
 Storage Access Framework APIs. It can select a local Markdown document through
 the system picker or receive one through **Open with** without broad storage
 permission.
+
+The intermediate mobile build also has a single-repository browser and a
+minimal Settings screen. It reads format-1 `repository.json` and Markdown files
+over HTTPS, with optional Basic authentication, and opens remote content in
+the same Reader used for local files. Repository URL, HTTP login, and SFTP
+connection fields are not hardcoded. Passwords are encrypted with an AES/GCM
+key held by Android Keystore and are never filled back into the Settings UI.
+
+Repository View is a single file-browser list: `..` first outside the root,
+then child folders, then Markdown documents. Tapping a folder replaces the list
+with that folder's contents; tapping a document opens the existing Reader.
+Refresh retains the current relative path or falls back to its nearest existing
+parent. If SFTP is enabled, Upload launches the Android picker and
+accepts a case-insensitive `.md` filename. The file is sent directly to the
+currently open repository folder; no destination picker is shown. Existing
+remote files require confirmation. A successful transfer is followed by an
+automatic HTTP refresh while retaining the folder. If only refresh fails, the
+UI reports that upload completed. SFTP uses `com.github.mwiede:jsch:0.2.26` and
+trust-on-first-use host-key storage; a changed known key is rejected.
 
 The first version renders headings, paragraphs, bullet and numbered lists,
 bold, italic, inline code, fenced code blocks, and links. It provides an
@@ -271,8 +291,9 @@ cd android
 ```
 
 The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
-Links are styled for reading but are not opened in this first version. Images,
-tables, editing, and a dedicated tablet layout are not implemented.
+Links are styled for reading but are not opened. Images, tables, editing,
+multiple repositories, repository search, delete/mkdir/rename, and a dedicated
+tablet layout are not implemented.
 
 The current experimental build permanently reserves a 50 dp bottom banner with
 a local advertising placeholder for UX evaluation. No advertising network,
@@ -476,8 +497,8 @@ python3 -m py_compile mdview test_mdview.py
 
 Рядом с Python-реализацией размещена реализация на C. Она использует
 `ncursesw` и wide-character API и собирается как `build/mdview-c`.
-Обе реализации предоставляют одинаковое поведение локального Reader.
-Repository View пока доступен только в Python-реализации.
+Обе TUI-реализации предоставляют одинаковое поведение локального Reader.
+Сетевого Repository View нет в C-версии; он независимо реализован в Python и Android.
 
 Для сборки нужны C-компилятор, `pkg-config` и development-пакет wide-character
 ncurses (например, `libncursesw5-dev` в Debian/Ubuntu):
@@ -501,11 +522,26 @@ mapping и тот же минимальный рендер заголовков,
 
 ### Android-версия
 
-Независимое экспериментальное Android-приложение находится в `android/`.
+Независимое Android-приложение находится в `android/`.
 Оно работает на Android 9 (API 28) и новее, написано на Kotlin и Jetpack
 Compose и использует Storage Access Framework. Markdown-файл можно выбрать
 через системный picker или передать через «Открыть с помощью» без полного
 доступа к файловой системе.
+
+Промежуточная мобильная версия работает с одним репозиторием. Экран
+Settings хранит URL, HTTP login и SFTP-параметры без хардкода. HTTPS индекс и
+документы поддерживают Basic authentication. Пароли шифруются AES/GCM-ключом
+Android Keystore и не возвращаются в поля UI после сохранения.
+
+Repository View использует единый файловый список: во вложенной папке первым идёт
+`..`, затем дочерние каталоги, затем Markdown-документы. Tap по каталогу открывает
+его, tap по документу запускает существующий Reader. Breadcrumbs и двухколоночного
+режима нет. Refresh сохраняет текущий relative path или выбирает ближайшего
+существующего родителя.
+Upload выбирает `.md` через Android picker и загружает его по SFTP строго в текущую
+папку, с подтверждением замены и автоматическим Refresh. Используется
+`com.github.mwiede:jsch:0.2.26`; первый SSH host key сохраняется по TOFU, а его смена
+отклоняется.
 
 Первая версия отображает заголовки, абзацы, маркированные и нумерованные
 списки, bold, italic, inline code, fenced code blocks и ссылки. Есть отдельная
@@ -522,8 +558,9 @@ cd android
 ```
 
 Debug APK создаётся в `android/app/build/outputs/apk/debug/app-debug.apk`.
-Ссылки в первой версии стилизуются, но не открываются. Изображения, таблицы,
-редактирование и отдельный планшетный интерфейс пока не реализованы.
+Ссылки стилизуются, но не открываются. Изображения, таблицы, редактирование,
+несколько репозиториев, поиск по репозиторию, delete/mkdir/rename и отдельный
+планшетный интерфейс пока не реализованы.
 
 Текущая экспериментальная сборка постоянно резервирует внизу 50 dp для
 локальной рекламной UX-заглушки. Рекламная сеть, tracking и сетевые

@@ -1,9 +1,11 @@
 <!--
   AndroidManifest.xml — created 2026-08-26, version 0.1.0.
-  Purpose: declare the mdview Android activity and Markdown Open-with intents.
-  Algorithm: expose a single read-only activity for launcher and content URIs.
+  Purpose: declare mdview networking, its activity, and Markdown Open-with intents.
+  Algorithm: expose one activity, accept content URIs, and permit HTTP/SFTP access.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"

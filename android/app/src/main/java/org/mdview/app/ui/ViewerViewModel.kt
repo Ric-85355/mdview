@@ -17,6 +17,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.mdview.app.data.DocumentRepository
 import org.mdview.app.data.ReadingPositionStore
 import org.mdview.app.markdown.DocumentSectionResolver
@@ -81,6 +83,33 @@ class ViewerViewModel(
         savedStateHandle["documentUri"] = uri.toString()
         viewModelScope.launch {
             repository.load(uri).fold(
+                onSuccess = { loaded ->
+                    document = loaded
+                    currentDocumentBlockIndex = positions.load(loaded.id)
+                        .coerceAtMost(loaded.blocks.lastIndex.coerceAtLeast(0))
+                    synchronizeCurrentSection()
+                    updateSearch(searchQuery)
+                    loading = false
+                },
+                onFailure = { failure ->
+                    document = null
+                    errorMessage = failure.message ?: "Could not read the selected document"
+                    loading = false
+                },
+            )
+        }
+    }
+
+    fun openSource(id: String, title: String, source: String) {
+        loading = true
+        errorMessage = null
+        savedStateHandle["documentUri"] = null
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    org.mdview.app.markdown.MarkdownParser.parse(id, title, source)
+                }
+            }.fold(
                 onSuccess = { loaded ->
                     document = loaded
                     currentDocumentBlockIndex = positions.load(loaded.id)

@@ -81,7 +81,12 @@ import org.mdview.app.markdown.MarkdownHeading
 import org.mdview.app.markdown.SearchMatch
 
 @Composable
-fun MdviewApp(viewModel: ViewerViewModel, onOpenDocument: () -> Unit) {
+fun MdviewApp(
+    viewModel: ViewerViewModel,
+    onOpenDocument: () -> Unit,
+    onRepository: () -> Unit,
+    onSettings: () -> Unit,
+) {
     MdviewTheme {
         val listState = rememberLazyListState()
         val scope = rememberCoroutineScope()
@@ -109,6 +114,8 @@ fun MdviewApp(viewModel: ViewerViewModel, onOpenDocument: () -> Unit) {
                     depth = viewModel.tocDepth,
                     tocOpen = viewModel.tocOpen,
                     onOpenDocument = onOpenDocument,
+                    onRepository = onRepository,
+                    onSettings = onSettings,
                     onTocAction = {
                         if (viewModel.tocOpen) viewModel.cycleTocDepth()
                         else viewModel.updateTocOpen(true)
@@ -162,6 +169,8 @@ private fun ReaderTopBar(
     depth: Int,
     tocOpen: Boolean,
     onOpenDocument: () -> Unit,
+    onRepository: () -> Unit,
+    onSettings: () -> Unit,
     onTocAction: () -> Unit,
     onSearch: () -> Unit,
     onAbout: () -> Unit,
@@ -179,8 +188,16 @@ private fun ReaderTopBar(
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
+                        text = { Text("Repository") },
+                        onClick = { menuOpen = false; onRepository() },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Open file") },
                         onClick = { menuOpen = false; onOpenDocument() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        onClick = { menuOpen = false; onSettings() },
                     )
                     DropdownMenuItem(
                         text = { Text("About") },

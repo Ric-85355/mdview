@@ -118,6 +118,41 @@ viewport; навигация поиска прокручивает его к к�
 Сборка: JDK 17, Android SDK API 35, `cd android && ./gradlew
 testDebugUnitTest assembleDebug lintDebug`. APK: `android/app/build/outputs/apk/debug/app-debug.apk`.
 
+### Android Repository/Upload срез
+
+Android-версия теперь имеет один настраиваемый HTTPS/SFTP-репозиторий.
+`RepositoryViewModel` управляет экранами Repository/Reader/Settings, загруженным
+индексом, текущим относительным путём и одной сетевой/SFTP-операцией. Путь
+хранится в `SavedStateHandle`. Repository View теперь однооконный: во вложенной
+папке первым идёт `..`, затем дочерние каталоги, затем Markdown-документы; tap
+заменяет список содержимым каталога либо открывает документ в Reader. Breadcrumbs
+и двухпанельного режима нет. Строки используют компактные штатные Material Icons:
+стрелку вверх для `..`, папку для каталога и документ для `.md`, без emoji.
+Format-1 parser поддерживает документы и каталоги
+рядом, корень и два уровня каталогов, отклоняя unsafe paths. Refresh заново находит
+точную папку по сохранённому relative path или возвращается к ближайшему
+существующему родителю; ошибка не уничтожает старый индекс.
+
+Settings хранит `name`, `repository_url`, HTTP user и SFTP enabled/host/port/user/root
+в private SharedPreferences. HTTP/SFTP passwords хранятся только как AES/GCM ciphertext;
+неэкспортируемый AES-256 key создаётся в Android Keystore. Пароли не показываются
+после сохранения и не пишутся в Logcat. `RepositoryHttpClient` на `HttpURLConnection` одинаково
+применяет optional Basic authentication к `repository.json` и документам. Удалённый Markdown
+парсится в `ViewerViewModel.openSource()` и открывается в прежнем Reader с поиском, TOC,
+темами и позицией по stable HTTP URL.
+
+Upload использует Android `OpenDocument`, `ContentResolver` и `OpenableColumns.DISPLAY_NAME`.
+Принимается только case-insensitive `.md` basename без separators/traversal. SFTP destination
+строится только из `sftp_root`, текущего repository-relative path и basename. Библиотека
+`com.github.mwiede:jsch:0.2.26` открывает password-authenticated SSH/SFTP только на одну
+операцию. SSH host keys хранятся по TOFU в private `sftp_known_hosts`; изменившийся
+ключ отклоняется. Перед upload файл проверяется по SFTP; overwrite требует
+подтверждения. После успеха SFTP закрывается и выполняется HTTP Refresh с тем же
+путём. Ошибка Refresh после upload показывает отдельный успешный результат Upload.
+
+Ограничения этапа: один репозиторий, нет Sources, repository search, offline cache,
+delete/mkdir/rename/move, SFTP key auth, ручной fingerprint verification и Share-to-upload.
+
 ## Текущий статус
 
 Проект подготовлен к первому релизу `0.3.0`.

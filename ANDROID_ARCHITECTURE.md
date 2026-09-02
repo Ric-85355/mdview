@@ -573,3 +573,75 @@ tracking, consent SDK и дополнительные сетевые разре�
 - допустим только нижний banner минимальной высоты;
 - реклама не накладывается на документ;
 - interstitial, fullscreen, popup и вставки между абзацами документа недопустимы.
+
+---
+
+## 25. Промежуточная Repository/Upload-версия
+
+Android-клиент дополнен одним настраиваемым HTTPS/SFTP Markdown-репозиторием. Это
+промежуточный мобильный срез: Sources View и несколько репозиториев пока не
+реализованы.
+
+### 25.1. Экраны и состояние
+
+`RepositoryViewModel` хранит режим `Repository` / `Reader` / `Settings`, загруженный
+индекс, текущий repository-relative путь и состояние сетевой операции. Путь
+дублируется в `SavedStateHandle`; поворот не повторяет picker, HTTP-открытие или SFTP
+Upload. Прежний `ViewerViewModel` и Markdown renderer переиспользуются для локальных и
+удалённых документов.
+
+Repository View — однооконный файловый браузер без breadcrumbs и наложения:
+во вложенном каталоге первым отображается `..`, затем регистронезависимо
+отсортированные дочерние каталоги, затем Markdown-документы. Каталоги и документы
+могут находиться рядом и всегда попадают в один список. Tap по каталогу заменяет
+список его содержимым, tap по документу открывает существующий Reader, а `..`
+переходит к родителю. Поддерживаются документы в корне и не более двух уровней
+каталогов. Текущий каталог хранится как repository-relative path в
+`SavedStateHandle`. Refresh заново находит точную папку по этому пути или ближайшего
+существующего родителя; при ошибке старый индекс остаётся доступен.
+
+### 25.2. Settings и HTTP
+
+Несекретные поля одного репозитория хранятся в private SharedPreferences:
+`name`, `repository_url`, `http_user`, `sftp_enabled`, `sftp_host`, `sftp_port`,
+`sftp_user`, `sftp_root`. URL нормализуется независимо от завершающего `/`.
+
+HTTPS для `repository.json` и `.md` использует один `RepositoryHttpClient` на базе
+`HttpURLConnection`, Basic authentication, timeout и строгое UTF-8 декодирование.
+Ошибки 401/403 показываются как ошибка HTTP-авторизации.
+
+### 25.3. Хранение секретов
+
+HTTP и SFTP passwords не хранятся открытым текстом. `SecureSecretStore`
+генерирует неэкспортируемый AES-256 key в Android Keystore и шифрует каждое значение
+через `AES/GCM/NoPadding` с новым IV. В private preferences записываются только IV и
+ciphertext. После сохранения пароли не подставляются обратно в UI; есть явная
+команда очистки.
+
+### 25.4. SFTP Upload
+
+Единственная новая runtime-зависимость — `com.github.mwiede:jsch:0.2.26`.
+Это pure-Java SSH2/SFTP-реализация с password authentication, которая собирается
+и dex-трансформируется для текущего minSdk 28. Каждый Upload создаёт и закрывает
+отдельные SSH/SFTP session/channel.
+
+Первый SSH host key принимается по TOFU и пишется в private app file
+`sftp_known_hosts`; изменившийся известный ключ отклоняется. Это важное ограничение
+промежуточного UI: отдельного экрана для проверки fingerprint перед первым
+подключением пока нет.
+
+Upload picker читает `content://` через `ContentResolver` и берёт имя только из
+`OpenableColumns.DISPLAY_NAME`. Допускается только case-insensitive `.md` basename без
+separator/`.`/`..`. Destination строится только из `sftp_root`, текущего
+repository-relative path и безопасного basename. Существование проверяется
+по SFTP; overwrite возможен только после диалога подтверждения.
+
+После успешной передачи SFTP-сессия закрывается, затем индекс обновляется по
+HTTPS с восстановлением той же папки. Ошибка этого Refresh не меняет успешный
+результат Upload и показывается как `Upload completed, repository refresh failed`.
+
+### 25.5. Ограничения среза
+
+Пока нет нескольких репозиториев, Sources, repository search, offline cache,
+delete/mkdir/rename/move, key-based SFTP auth, ручной проверки host-key fingerprint,
+Share-to-upload и фоновой синхронизации. Reader остаётся read-only.
