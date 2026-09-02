@@ -84,7 +84,8 @@ View в C на текущем этапе не переносится.
 - `ui/MdviewApp.kt` — Compose UI, LazyColumn документа, отдельная область оглавления,
   double tap, поиск и системные темы;
 
-- `MainActivity.kt` — `OpenDocument` picker, `ACTION_VIEW`/Open with и persistable URI access.
+- `MainActivity.kt` — `OpenDocument` picker, `ACTION_VIEW`/Open with, `ACTION_SEND`/Share
+  и URI access без преобразования `content://` в filesystem path.
 
 Реализованы H1–H6 в документе, H1–H3 в оглавлении, абзацы, списки,
 bold, italic, inline/fenced code и визуальное оформление ссылок. Есть поиск с
@@ -163,6 +164,20 @@ Upload использует Android `OpenDocument`, `ContentResolver` и `Openab
 подтверждения. После успеха SFTP закрывается и выполняется HTTP Refresh с тем же
 путём. Ошибка Refresh после upload показывает отдельный успешный результат Upload.
 
+Activity зарегистрирована как получатель одного `ACTION_SEND` для `text/markdown`,
+`text/x-markdown`, `text/plain` и `application/octet-stream`; MIME не считается доверенным,
+поэтому display name всегда повторно проверяется как case-insensitive `.md` basename.
+Корректный Share переводит в Repository без автозагрузки. `pendingSharedFile` хранит
+только URI-строку и display name в `SavedStateHandle`, поэтому переживает recreation,
+но не хранится как настройка. Пока он есть, между alias Repository и Menu виден компактный
+`Upload →` без имени файла; tap по нему только открывает общее Menu. В Menu показываются
+полужирные `Upload here: <name>` и `Cancel shared file`. Индикатор не имеет отдельного UI-состояния:
+его видимость напрямую зависит от `pendingSharedFile`, поэтому он сохраняется при навигации/recreation
+и исчезает после Upload или Cancel. Пользователь выбирает destination обычной навигацией Repository;
+`Upload here` передаёт тот же `UploadSelection` в существующий collision/SFTP/Refresh path.
+Pending сохраняется при Cancel Replace или ошибке upload, но очищается сразу
+после успешного SFTP, в том числе если последующий Refresh не удался.
+
 Все новые mutation paths строятся только из нормализованных `sftp_root`, текущего
 repository-relative path и проверенного basename; separators, `.`/`..` и выход за
 root отклоняются до соединения. mkdir/rename/rm/rmdir используют тот же короткий
@@ -173,8 +188,8 @@ Refresh не подменяет успешный результат mutation. К
 placeholder-файлов.
 
 Ограничения этапа: один репозиторий, нет Sources, repository search, offline cache,
-copy/move, recursive delete, multi-select, SFTP key auth, ручной fingerprint
-verification и Share-to-upload.
+copy/move, recursive delete, multi-select, SFTP key auth и ручной fingerprint
+verification. Share поддерживает только один файл; `ACTION_SEND_MULTIPLE` и batch upload нет.
 
 ## Текущий статус
 

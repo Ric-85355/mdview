@@ -277,6 +277,10 @@ remote files require confirmation. A successful transfer is followed by an
 automatic HTTP refresh while retaining the folder. If only refresh fails, the
 UI reports that upload completed. SFTP uses `com.github.mwiede:jsch:0.2.26` and
 trust-on-first-use host-key storage; a changed known key is rejected.
+Android Share can also send one `.md` file to mdview. The app opens Repository
+View without uploading automatically; navigate to the destination folder and
+choose `Upload here: filename.md`, or cancel the pending shared file. This uses
+the same collision confirmation, SFTP upload, and Refresh path as picker Upload.
 All mutation names are validated as single path segments and cannot escape the
 configured SFTP root. Copy, move, recursive delete, and multi-selection are not
 implemented. The bundled PHP index includes empty first- and second-level
@@ -551,6 +555,10 @@ Upload выбирает `.md` через Android picker и загружает е
 папку, с подтверждением замены и автоматическим Refresh. Используется
 `com.github.mwiede:jsch:0.2.26`; первый SSH host key сохраняется по TOFU, а его смена
 отклоняется.
+Android Share также может передать в mdview один `.md`. Приложение
+открывает Repository без автозагрузки: нужно перейти в папку назначения
+и выбрать `Upload here: filename.md` либо отменить pending Share. Используются
+те же collision confirmation, SFTP Upload и Refresh, что и для picker Upload.
 Имена всех SFTP-операций валидируются как один path segment и не могут выйти за
 пределы `sftp_root`. Copy, Move, recursive delete и multi-select не реализованы.
 Комплектный PHP-индекс включает пустые каталоги первого и второго уровня, поэтому

@@ -1,8 +1,8 @@
 /*
  * MainActivity.kt — created 2026-08-26, version 0.1.0.
- * Purpose: host Repository/Reader/Settings and both Android file pickers.
- * Algorithm: route retained screen state through ViewModels, forward Open-with
- * URIs to Reader, and send upload picker results to the repository workflow.
+ * Purpose: host Repository/Reader/Settings, file pickers, Open-with, and Share.
+ * Algorithm: route retained state through ViewModels, forward ACTION_VIEW to Reader,
+ * and turn one ACTION_SEND URI into a pending repository upload without auto-uploading.
  */
 
 package org.mdview.app
@@ -29,10 +29,11 @@ import org.mdview.app.repository.RepositoryViewModel
 
 class MainActivity : ComponentActivity() {
     private var incomingUri by mutableStateOf<Uri?>(null)
+    private var incomingShare by mutableStateOf<IncomingShare?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        incomingUri = intent.takeIf { it.action == Intent.ACTION_VIEW }?.data
+        if (savedInstanceState == null) handleIncomingIntent(intent)
         setContent {
             val viewer: ViewerViewModel = viewModel()
             val repository: RepositoryViewModel = viewModel()
@@ -53,6 +54,12 @@ class MainActivity : ComponentActivity() {
                     viewer.openDocument(it)
                     repository.showReader()
                     incomingUri = null
+                }
+            }
+            LaunchedEffect(incomingShare) {
+                incomingShare?.let {
+                    repository.onSharedUri(it.action, it.uri)
+                    incomingShare = null
                 }
             }
             BackHandler(enabled = repository.screen != AppScreen.Repository) {
@@ -85,8 +92,20 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.action == Intent.ACTION_VIEW) incomingUri = intent.data
+        handleIncomingIntent(intent)
     }
+
+    private fun handleIncomingIntent(intent: Intent) {
+        when (intent.action) {
+            Intent.ACTION_VIEW -> incomingUri = intent.data
+            Intent.ACTION_SEND -> incomingShare = IncomingShare(Intent.ACTION_SEND, sharedUri(intent))
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun sharedUri(intent: Intent): Uri? =
+        intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            ?: intent.clipData?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.uri
 
     private fun persistReadPermission(uri: Uri) {
         runCatching {
@@ -97,3 +116,5 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+private data class IncomingShare(val action: String, val uri: Uri?)

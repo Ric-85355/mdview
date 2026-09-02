@@ -636,11 +636,16 @@ ciphertext. После сохранения пароли не подставля
 промежуточного UI: отдельного экрана для проверки fingerprint перед первым
 подключением пока нет.
 
-Upload picker читает `content://` через `ContentResolver` и берёт имя только из
+Upload picker и одиночный `ACTION_SEND` читают `content://` через `ContentResolver` и берут имя только из
 `OpenableColumns.DISPLAY_NAME`. Допускается только case-insensitive `.md` basename без
 separator/`.`/`..`. Destination строится только из `sftp_root`, текущего
 repository-relative path и безопасного basename. Существование проверяется
 по SFTP; overwrite возможен только после диалога подтверждения.
+
+Share не запускает Upload автоматически: URI и display name сохраняются как
+`pendingSharedFile` в `SavedStateHandle`, а Repository Menu даёт `Upload here` для текущей
+папки и Cancel. После успешного SFTP pending очищается до Refresh, чтобы ошибка
+индекса не вызвала повторную загрузку. `ACTION_SEND_MULTIPLE` не поддерживается.
 
 После успешной передачи SFTP-сессия закрывается, затем индекс обновляется по
 HTTPS с восстановлением той же папки. Ошибка этого Refresh не меняет успешный
@@ -658,7 +663,7 @@ destination всегда строится из `sftp_root`, текущего rep
 
 Пока нет нескольких репозиториев, Sources, repository search, offline cache,
 copy/move, recursive delete, multi-select, key-based SFTP auth, ручной проверки
-host-key fingerprint, Share-to-upload и фоновой синхронизации. Reader остаётся
+host-key fingerprint, multi-file Share и фоновой синхронизации. Reader остаётся
 read-only. Комплектный `server/mdrepo/repository.php` включает пустые каталоги
 первого и второго уровня, поэтому New folder появляется после Refresh без
 placeholder-файлов.

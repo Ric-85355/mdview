@@ -1,8 +1,8 @@
 /*
  * RepositoryViewModel.kt — created 2026-09-01, version 0.1.0.
- * Purpose: retain Repository, Settings, Reader routing, refresh, and upload state.
+ * Purpose: retain Repository, Settings, Reader routing, refresh, upload, and Share state.
  * Algorithm: serialize network/SFTP operations in viewModelScope, preserve the
- * relative current folder, and expose one-shot picker/overwrite decisions to UI.
+ * relative current folder, and expose picker, pending Share, and overwrite decisions to UI.
  */
 
 package org.mdview.app.repository
@@ -57,6 +57,11 @@ class RepositoryViewModel(
         private set
     var overwriteSelection by mutableStateOf<UploadSelection?>(null)
         private set
+    var pendingSharedFile by mutableStateOf(
+        SharedFileImport.restore(savedStateHandle["sharedUri"], savedStateHandle["sharedName"]),
+    )
+        private set
+    private var overwriteFromSharedFile = false
 
     val currentDirectory: RepositoryDirectory?
         get() = repository?.nearestDirectory(currentDirectoryPath)
@@ -160,21 +165,53 @@ class RepositoryViewModel(
     fun onUploadUri(uri: Uri?) {
         if (uri == null || operation != RepositoryOperation.Idle) return
         runCatching { uploadSource.selection(uri) }
-            .onSuccess { upload(it, overwrite = false) }
+            .onSuccess { upload(it, overwrite = false, fromSharedFile = false) }
             .onFailure { message = userMessage("Could not use selected file", it) }
+    }
+
+    fun onSharedUri(action: String?, uri: Uri?) {
+        screen = AppScreen.Repository
+        overwriteSelection = null
+        overwriteFromSharedFile = false
+        runCatching {
+            requireNotNull(uri) { "Share did not contain a file" }
+            val selection = uploadSource.selection(uri)
+            SharedFileImport.create(action, uri.toString(), selection.fileName)
+        }.onSuccess {
+            persistPendingSharedFile(it)
+            message = "Shared file ready: ${it.displayName}"
+        }.onFailure {
+            persistPendingSharedFile(null)
+            message = userMessage("Could not use shared file", it)
+        }
+    }
+
+    fun uploadSharedFileHere() {
+        val pending = pendingSharedFile ?: return
+        upload(pending.uploadSelection(), overwrite = false, fromSharedFile = true)
+    }
+
+    fun cancelSharedFile() {
+        overwriteSelection = null
+        overwriteFromSharedFile = false
+        persistPendingSharedFile(SharedFileImport.cancel())
+        message = null
     }
 
     fun confirmOverwrite() {
         val selection = overwriteSelection ?: return
+        val fromSharedFile = overwriteFromSharedFile
         overwriteSelection = null
-        upload(selection, overwrite = true)
+        overwriteFromSharedFile = false
+        upload(selection, overwrite = true, fromSharedFile = fromSharedFile)
     }
 
     fun cancelOverwrite() {
         overwriteSelection = null
+        overwriteFromSharedFile = false
     }
 
-    private fun upload(selection: UploadSelection, overwrite: Boolean) {
+    private fun upload(selection: UploadSelection, overwrite: Boolean, fromSharedFile: Boolean) {
         if (operation != RepositoryOperation.Idle) return
         val destinationDirectory = currentDirectoryPath
         operation = RepositoryOperation.Uploading
@@ -192,10 +229,16 @@ class RepositoryViewModel(
                 when (result) {
                     UploadResult.AlreadyExists -> {
                         overwriteSelection = selection
+                        overwriteFromSharedFile = fromSharedFile
                         operation = RepositoryOperation.Idle
                         message = null
                     }
                     UploadResult.Completed -> {
+                        if (fromSharedFile) {
+                            persistPendingSharedFile(
+                                SharedFileImport.afterUpload(pendingSharedFile, completed = true),
+                            )
+                        }
                         currentDirectoryPath = destinationDirectory
                         refreshNow(
                             operationWhileLoading = RepositoryOperation.Refreshing,
@@ -209,6 +252,12 @@ class RepositoryViewModel(
                 message = userMessage("Upload failed", it)
             }
         }
+    }
+
+    private fun persistPendingSharedFile(pending: PendingSharedFile?) {
+        pendingSharedFile = pending
+        savedStateHandle["sharedUri"] = pending?.contentUri
+        savedStateHandle["sharedName"] = pending?.displayName
     }
 
     fun createFolder(name: String) {

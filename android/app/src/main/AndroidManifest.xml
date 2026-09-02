@@ -1,7 +1,7 @@
 <!--
   AndroidManifest.xml — created 2026-08-26, version 0.1.0.
-  Purpose: declare mdview networking, its activity, and Markdown Open-with intents.
-  Algorithm: expose one activity, accept content URIs, and permit HTTP/SFTP access.
+  Purpose: declare networking plus Markdown Open-with and single-file Share intents.
+  Algorithm: expose one activity, accept granted content URIs, and permit HTTP/SFTP access.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
@@ -29,6 +29,14 @@
                 <data android:mimeType="text/markdown" />
                 <data android:mimeType="text/x-markdown" />
                 <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
     </application>

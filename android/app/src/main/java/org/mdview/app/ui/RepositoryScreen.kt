@@ -1,6 +1,6 @@
 /*
  * RepositoryScreen.kt — created 2026-09-01, version 0.1.0.
- * Purpose: render the single-repository browser and operation controls.
+ * Purpose: render the single-repository browser, pending Share, and operation controls.
  * Algorithm: show one file-manager-style list for the current folder, with a
  * parent entry first, then child folders and documents, delegating actions.
  */
@@ -51,6 +51,7 @@ import org.mdview.app.repository.RepositoryBrowserEntry
 import org.mdview.app.repository.RepositoryDocument
 import org.mdview.app.repository.RepositoryOperation
 import org.mdview.app.repository.RepositoryViewModel
+import org.mdview.app.repository.SharedFileImport
 import org.mdview.app.repository.browserEntries
 
 @Composable
@@ -77,12 +78,41 @@ fun RepositoryScreen(
                             modifier = Modifier.weight(1f),
                             fontWeight = FontWeight.Bold,
                         )
+                        if (SharedFileImport.hasPending(viewModel.pendingSharedFile)) {
+                            TextButton(onClick = { menuExpanded = true }) {
+                                Text("Upload →")
+                            }
+                        }
                         Box {
                             TextButton(onClick = { menuExpanded = true }) { Text("Menu") }
                             DropdownMenu(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false },
                             ) {
+                                viewModel.pendingSharedFile?.let { pending ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "Upload here: ${pending.displayName}",
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                        },
+                                        enabled = viewModel.canUpload,
+                                        onClick = {
+                                            menuExpanded = false
+                                            viewModel.uploadSharedFileHere()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Cancel shared file", fontWeight = FontWeight.Bold) },
+                                        enabled = viewModel.operation == RepositoryOperation.Idle,
+                                        onClick = {
+                                            menuExpanded = false
+                                            viewModel.cancelSharedFile()
+                                        },
+                                    )
+                                    HorizontalDivider()
+                                }
                                 DropdownMenuItem(
                                     text = { Text("Refresh") },
                                     enabled = viewModel.operation == RepositoryOperation.Idle,
