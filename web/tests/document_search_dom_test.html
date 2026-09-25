@@ -1,0 +1,46 @@
+<!--
+  document_search_dom_test.html — created 2026-09-25, version 0.5.0.
+  Purpose: browser regression-test transient document search highlighting.
+  Algorithm: decorate and clear a representative DOM, then verify text, links, ids, and nesting.
+-->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>RUNNING</title></head>
+<body>
+<article id="fixture">
+    <h2 id="toc-target">Alpha heading</h2>
+    <p>alpha <a id="fixture-link" href="https://example.com/path">Alpha link</a></p>
+    <p><strong id="fixture-strong">Nested alpha text</strong></p>
+</article>
+<pre id="result"></pre>
+<script src="../mdview-server/assets/document-search.js"></script>
+<script>
+/* Browser-only assertions intentionally avoid a test framework or production dependency. */
+'use strict';
+
+const fixture = document.querySelector('#fixture');
+const originalText = fixture.textContent;
+const failures = [];
+function check(condition, message) {
+    if (!condition) failures.push(message);
+}
+
+const marks = window.MdviewDocumentSearch.highlight(fixture, 'ALPHA');
+check(marks.length === 4, 'all visible case-insensitive matches should be wrapped');
+check(document.querySelector('#toc-target')?.id === 'toc-target', 'TOC target id must survive highlight');
+check(document.querySelector('#fixture-link')?.getAttribute('href') === 'https://example.com/path', 'link must survive highlight');
+check(document.querySelector('#fixture-strong')?.tagName === 'STRONG', 'nested markup must survive highlight');
+
+window.MdviewDocumentSearch.clearHighlights(fixture);
+check(fixture.querySelectorAll('mark[data-mdview-search]').length === 0, 'clear must remove every mark');
+check(fixture.textContent === originalText, 'clear must restore displayed text');
+check(document.querySelector('#toc-target')?.id === 'toc-target', 'TOC target id must survive clear');
+check(document.querySelector('#fixture-link')?.getAttribute('href') === 'https://example.com/path', 'link must survive clear');
+check(document.querySelector('#fixture-strong')?.tagName === 'STRONG', 'nested markup must survive clear');
+
+const result = failures.length === 0 ? 'PASS document search DOM integrity' : `FAIL ${failures.join('; ')}`;
+document.querySelector('#result').textContent = result;
+document.title = failures.length === 0 ? 'PASS' : 'FAIL';
+</script>
+</body>
+</html>

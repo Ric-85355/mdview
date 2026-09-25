@@ -1,7 +1,7 @@
 <?php
 /*
- * mdview.php — created 2026-09-25, version 0.4.1.
- * Purpose: provide the Web MDView entry point with Repository, Reader, and TOC drawer UI.
+ * mdview.php — created 2026-09-25, version 0.5.0.
+ * Purpose: provide the Web MDView entry point with Repository and complete reading UI.
  * Algorithm: serve an accessible application shell whose vanilla-JS client authenticates,
  * navigates repositories and displays renderer-independent DocumentView responses.
  */
@@ -66,10 +66,23 @@ declare(strict_types=1);
                     aria-expanded="false" aria-controls="toc-drawer">
                 Contents
             </button>
-            <button id="reader-search" class="reader-toolbar-center" type="button" disabled title="Available in the next stage">
+            <button id="reader-search" class="reader-toolbar-center" type="button" disabled
+                    aria-expanded="false" aria-controls="reader-search-panel">
                 Search
             </button>
             <button id="back" class="reader-toolbar-end" type="button">Repository</button>
+        </div>
+        <div id="reader-search-panel" class="reader-search-panel" role="search" hidden>
+            <label class="reader-search-query">
+                <span class="visually-hidden">Search this document</span>
+                <input id="reader-search-query" type="search" placeholder="Search document"
+                       autocomplete="off" enterkeyhint="search">
+            </label>
+            <output id="reader-search-count" class="reader-search-count" aria-live="polite">0 / 0</output>
+            <button id="reader-search-previous" type="button" disabled>Previous</button>
+            <button id="reader-search-next" type="button" disabled>Next</button>
+            <button id="reader-search-clear" class="quiet-button" type="button" disabled>Clear</button>
+            <button id="reader-search-close" class="quiet-button" type="button">Close</button>
         </div>
         <div id="toc-overlay" class="toc-overlay" hidden>
             <aside id="toc-drawer" class="toc-drawer" role="dialog" aria-labelledby="toc-title">
@@ -109,6 +122,8 @@ declare(strict_types=1);
 <script src="mdview-server/assets/repository-state.js"></script>
 <script src="mdview-server/assets/reader-state.js"></script>
 <script src="mdview-server/assets/login-form.js"></script>
+<script src="mdview-server/assets/document-search.js"></script>
+<script src="mdview-server/assets/reading-position.js"></script>
 <script src="mdview-server/assets/app.js"></script>
 </body>
 </html>

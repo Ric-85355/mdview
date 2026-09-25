@@ -192,7 +192,7 @@ placeholder-файлов.
 copy/move, recursive delete, multi-select, SFTP key auth и ручной fingerprint
 verification. Share поддерживает только один файл; `ACTION_SEND_MULTIPLE` и batch upload нет.
 
-## Web-версия: этапы 1–3 и 4A
+## Web-версия: этапы 1–4B
 
 В `web/` создан минимальный фундамент MDView Web для PHP 8.1+ и обычного shared hosting.
 Deployment layout совпадает с архитектурой: `mdview.php` размещается в `repository-root`,
@@ -241,7 +241,7 @@ Node-тестом. ACL в JavaScript не дублируется: список �
 
 Этап 3 добавил renderer-independent Reader UI, использующий только `DocumentView.title` и
 `DocumentView.content`. Постоянная верхняя панель имеет финальную трёхчастную структуру
-`Contents | Search | Repository`; Search disabled до этапа 4B, а Repository
+`Contents | Search | Repository`; Repository
 возвращает прежний список, каталог и scroll position. При начале загрузки старый документ
 очищается и показывается отдельное состояние Opening; 400/403/404/render/server errors
 показываются внутри Reader с рабочим возвратом, а 401 переводит к login как потеря сессии.
@@ -262,9 +262,19 @@ Reader, имеет собственную вертикальную прокру�
 sticky toolbar через `scroll-margin-top`. При пустом TOC Contents disabled. Frontend не анализирует
 Markdown/HTML для построения оглавления и не синхронизирует активный пункт при ручной прокрутке.
 
-Перед этапом 4B нужен первый реальный deployment/smoke-test на Hostinger и мобильном браузере.
-Search внутри документа и `localStorage` позиции чтения ещё не реализованы. Upload/New folder/
-Rename/Move/Delete и активные контекстные меню остаются для этапа 5.
+Этап 4B активировал Search в Reader. Поиск работает регистронезависимо по видимым
+текстовым узлам `DocumentView.content`, не обращается к backend и не повторяет Markdown rendering.
+Все совпадения временно оборачиваются в `mark`; текущее выделяется отдельно, Previous/Next
+цикличны, а счётчик имеет вид `N / total`. Clear и Close полностью удаляют временную
+подсветку, не меняя ссылки, HTML-вложенность, heading ids и TOC targets. Search и TOC имеют
+независимые UI-state; active-TOC sync и collapsible branches не реализованы.
+
+Позиция чтения каждого документа сохраняется в browser `localStorage` по версионному ключу из
+repository id и логического document path. Scroll save debounced с задержкой 200 ms. При повторном
+открытии offset восстанавливается один раз и ограничивается текущей высотой страницы.
+Явный переход к TOC target или search match имеет приоритет над отложенным restore. Backend и
+`DocumentView` не менялись. Upload/New folder/Rename/Move/Delete и активные контекстные
+меню остаются для этапа 5.
 
 Hostinger smoke-test выявил и исправил frontend-регрессию login submit: браузер может очистить
 `SubmitEvent.currentTarget` после первого `await`. Submit handler синхронно сохраняет ссылку на

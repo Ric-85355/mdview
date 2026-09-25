@@ -1,7 +1,8 @@
 # MDView Web
 
-This directory contains completed Web MDView stages 1–3 and stage 4A: the PHP
-foundation, responsive Repository UI, renderer-independent Reader UI, and TOC drawer. After authentication, the browser
+This directory contains completed Web MDView stages 1–4: the PHP foundation,
+responsive Repository UI, renderer-independent Reader UI, TOC drawer, document
+search, and browser-local reading positions. After authentication, the browser
 can select any server-authorized repository, navigate folders through
 breadcrumbs, search file and folder names, and open Markdown through the
 adaptive `DocumentView` Reader. Repository location and list scroll are kept
@@ -10,8 +11,11 @@ in browser `localStorage` and restored after reload or return from a document.
 The Reader provides its final toolbar structure, document title, loading/error
 states, bounded desktop reading width, mobile layout, and neutral content
 styles. Contents opens the same left overlay drawer on desktop and mobile,
-with H1–H3 depth controls and navigation by `DocumentView.toc` targets. Document
-Search remains disabled. Search/reading-position state and all repository mutations belong to
+with H1–H3 depth controls and navigation by `DocumentView.toc` targets. Search
+works on displayed document text without a backend request, highlights all
+matches, provides cyclic Previous/Next navigation and removes its temporary
+markup when cleared or closed. Per-document scroll offsets use a versioned
+`localStorage` key built from repository and logical document path. All repository mutations belong to
 later stages in `docs/MD-WEB-implementation-plan.md`. The visible Repository
 and item menus reserve their eventual locations, but their mutation commands
 are disabled.
@@ -32,7 +36,10 @@ web/
     ├── run.php                   # dependency-free backend tests
     ├── http_smoke.php            # real HTTP/session/API smoke test
     ├── login_form_test.js         # asynchronous browser login regression test
+    ├── document_search_test.js    # search matching/navigation state tests
+    ├── document_search_dom_test.html # real DOM highlight integrity test
     ├── reader_state_test.js       # Reader, DocumentView, and TOC state tests
+    ├── reading_position_test.js   # per-document position persistence tests
     └── repository_state_test.js  # browser-independent client-state tests
 ```
 
@@ -104,9 +111,13 @@ php web/tests/http_smoke.php
 node web/tests/repository_state_test.js
 node web/tests/reader_state_test.js
 node web/tests/login_form_test.js
+node web/tests/document_search_test.js
+node web/tests/reading_position_test.js
 node --check web/mdview-server/assets/repository-state.js
 node --check web/mdview-server/assets/reader-state.js
 node --check web/mdview-server/assets/login-form.js
+node --check web/mdview-server/assets/document-search.js
+node --check web/mdview-server/assets/reading-position.js
 node --check web/mdview-server/assets/app.js
 find web -name '*.php' -print0 | xargs -0 -n1 php -l
 ```
@@ -118,4 +129,6 @@ php -S 127.0.0.1:8080 -t web
 ```
 
 Open `http://127.0.0.1:8080/mdview.php`. The built-in PHP server is for local
-verification only.
+verification only. The optional real-DOM regression can be opened directly as
+`web/tests/document_search_dom_test.html`; its page title and result text become
+`PASS` when transient search marks preserve links, element nesting, and TOC ids.
