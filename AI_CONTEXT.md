@@ -192,7 +192,7 @@ placeholder-файлов.
 copy/move, recursive delete, multi-select, SFTP key auth и ручной fingerprint
 verification. Share поддерживает только один файл; `ACTION_SEND_MULTIPLE` и batch upload нет.
 
-## Web-версия: этапы 1–3
+## Web-версия: этапы 1–3 и 4A
 
 В `web/` создан минимальный фундамент MDView Web для PHP 8.1+ и обычного shared hosting.
 Deployment layout совпадает с архитектурой: `mdview.php` размещается в `repository-root`,
@@ -241,7 +241,7 @@ Node-тестом. ACL в JavaScript не дублируется: список �
 
 Этап 3 добавил renderer-independent Reader UI, использующий только `DocumentView.title` и
 `DocumentView.content`. Постоянная верхняя панель имеет финальную трёхчастную структуру
-`Contents | Search | Repository`; первые две кнопки видимы, но disabled до этапа 4, а Repository
+`Contents | Search | Repository`; Search disabled до этапа 4B, а Repository
 возвращает прежний список, каталог и scroll position. При начале загрузки старый документ
 очищается и показывается отдельное состояние Opening; 400/403/404/render/server errors
 показываются внутри Reader с рабочим возвратом, а 401 переводит к login как потеря сессии.
@@ -253,9 +253,24 @@ links, rules, tables и images. Длинный code и широкие tables п�
 с `noopener noreferrer`, внутренние anchors не изменяются. Чистые переходы loading/ready/error/back
 вынесены в `reader-state.js` и проверяются без браузера; тип/renderer документа frontend не проверяет.
 
-Следующий этап по `docs/MD-WEB-implementation-plan.md` — TOC drawer, уровни и переходы,
-поиск внутри документа и `localStorage` позиции чтения. Upload/New folder/Rename/Move/Delete
-и активные контекстные меню остаются для этапа 5.
+Этап 4A активировал Contents. Одинаковый для desktop/mobile левый drawer открывается поверх
+Reader, имеет собственную вертикальную прокрутку и не меняет layout либо scroll position
+документа. Он закрывается повторным Contents, отдельной кнопкой, Escape, кликом по backdrop
+или после выбора раздела. Максимальная глубина по умолчанию 3; кнопки `1 / 2 / 3` фильтруют
+готовые элементы `DocumentView.toc`, а визуальные отступы различают H1/H2/H3. Переход использует
+исключительно `target`, ищет соответствующий `id` только внутри `DocumentView.content` и учитывает
+sticky toolbar через `scroll-margin-top`. При пустом TOC Contents disabled. Frontend не анализирует
+Markdown/HTML для построения оглавления и не синхронизирует активный пункт при ручной прокрутке.
+
+Перед этапом 4B нужен первый реальный deployment/smoke-test на Hostinger и мобильном браузере.
+Search внутри документа и `localStorage` позиции чтения ещё не реализованы. Upload/New folder/
+Rename/Move/Delete и активные контекстные меню остаются для этапа 5.
+
+Hostinger smoke-test выявил и исправил frontend-регрессию login submit: браузер может очистить
+`SubmitEvent.currentTarget` после первого `await`. Submit handler синхронно сохраняет ссылку на
+форму, а `login-form.js` создаёт из неё `FormData`, после успешной авторизации сбрасывает эту же
+форму и больше не читает transient event context. Отдельный Node regression test воспроизводит `currentTarget = null`
+во время ожидающего login Promise. Протокол Auth, CSRF и backend API не менялись.
 
 ## Текущий статус
 

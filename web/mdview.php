@@ -1,7 +1,7 @@
 <?php
 /*
- * mdview.php — created 2026-09-25, version 0.3.0.
- * Purpose: provide the Web MDView entry point and stage-three Repository/Reader interface.
+ * mdview.php — created 2026-09-25, version 0.4.1.
+ * Purpose: provide the Web MDView entry point with Repository, Reader, and TOC drawer UI.
  * Algorithm: serve an accessible application shell whose vanilla-JS client authenticates,
  * navigates repositories and displays renderer-independent DocumentView responses.
  */
@@ -62,13 +62,31 @@ declare(strict_types=1);
 
     <section id="reader-panel" class="reader-panel" hidden aria-label="Document reader">
         <div class="reader-toolbar" aria-label="Reader controls">
-            <button id="reader-toc" class="reader-toolbar-start" type="button" disabled title="Available in the next stage">
+            <button id="reader-toc" class="reader-toolbar-start" type="button" disabled
+                    aria-expanded="false" aria-controls="toc-drawer">
                 Contents
             </button>
             <button id="reader-search" class="reader-toolbar-center" type="button" disabled title="Available in the next stage">
                 Search
             </button>
             <button id="back" class="reader-toolbar-end" type="button">Repository</button>
+        </div>
+        <div id="toc-overlay" class="toc-overlay" hidden>
+            <aside id="toc-drawer" class="toc-drawer" role="dialog" aria-labelledby="toc-title">
+                <header class="toc-header">
+                    <h2 id="toc-title">Contents</h2>
+                    <button id="toc-close" class="toc-close" type="button" aria-label="Close contents">&times;</button>
+                </header>
+                <div class="toc-depth" aria-label="Maximum heading depth">
+                    <span>Depth</span>
+                    <div class="toc-depth-buttons">
+                        <button type="button" data-toc-depth="1" aria-pressed="false">1</button>
+                        <button type="button" data-toc-depth="2" aria-pressed="false">2</button>
+                        <button type="button" data-toc-depth="3" aria-pressed="true">3</button>
+                    </div>
+                </div>
+                <nav id="toc-items" class="toc-items" aria-label="Document contents"></nav>
+            </aside>
         </div>
         <div id="reader-loading" class="reader-message" role="status" hidden>
             <span class="loading-indicator" aria-hidden="true"></span>
@@ -90,6 +108,7 @@ declare(strict_types=1);
 </main>
 <script src="mdview-server/assets/repository-state.js"></script>
 <script src="mdview-server/assets/reader-state.js"></script>
+<script src="mdview-server/assets/login-form.js"></script>
 <script src="mdview-server/assets/app.js"></script>
 </body>
 </html>

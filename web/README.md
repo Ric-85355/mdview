@@ -1,7 +1,7 @@
 # MDView Web
 
-This directory contains the first three completed Web MDView stages: the PHP
-foundation, responsive Repository UI, and renderer-independent Reader UI. After authentication, the browser
+This directory contains completed Web MDView stages 1–3 and stage 4A: the PHP
+foundation, responsive Repository UI, renderer-independent Reader UI, and TOC drawer. After authentication, the browser
 can select any server-authorized repository, navigate folders through
 breadcrumbs, search file and folder names, and open Markdown through the
 adaptive `DocumentView` Reader. Repository location and list scroll are kept
@@ -9,8 +9,9 @@ in browser `localStorage` and restored after reload or return from a document.
 
 The Reader provides its final toolbar structure, document title, loading/error
 states, bounded desktop reading width, mobile layout, and neutral content
-styles. TOC and document Search controls are present but disabled until stage 4.
-Document search/reading-position state and all repository mutations belong to
+styles. Contents opens the same left overlay drawer on desktop and mobile,
+with H1–H3 depth controls and navigation by `DocumentView.toc` targets. Document
+Search remains disabled. Search/reading-position state and all repository mutations belong to
 later stages in `docs/MD-WEB-implementation-plan.md`. The visible Repository
 and item menus reserve their eventual locations, but their mutation commands
 are disabled.
@@ -30,7 +31,8 @@ web/
 └── tests/
     ├── run.php                   # dependency-free backend tests
     ├── http_smoke.php            # real HTTP/session/API smoke test
-    ├── reader_state_test.js       # Reader mode and DocumentView state tests
+    ├── login_form_test.js         # asynchronous browser login regression test
+    ├── reader_state_test.js       # Reader, DocumentView, and TOC state tests
     └── repository_state_test.js  # browser-independent client-state tests
 ```
 
@@ -101,8 +103,10 @@ php web/tests/run.php
 php web/tests/http_smoke.php
 node web/tests/repository_state_test.js
 node web/tests/reader_state_test.js
+node web/tests/login_form_test.js
 node --check web/mdview-server/assets/repository-state.js
 node --check web/mdview-server/assets/reader-state.js
+node --check web/mdview-server/assets/login-form.js
 node --check web/mdview-server/assets/app.js
 find web -name '*.php' -print0 | xargs -0 -n1 php -l
 ```

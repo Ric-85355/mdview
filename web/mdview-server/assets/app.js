@@ -1,8 +1,8 @@
 /*
- * app.js — created 2026-09-25, version 0.3.0.
- * Purpose: provide Auth, Repository, search, and the stage-three DocumentView Reader UI.
- * Algorithm: use JSON API data, render explicit Repository/Reader states, preserve
- * Repository location and scroll, and insert only renderer-produced safe HTML.
+ * app.js — created 2026-09-25, version 0.4.1.
+ * Purpose: provide Auth, Repository, Reader, and stage-four-A TOC drawer UI.
+ * Algorithm: render explicit Repository/Reader states, preserve Repository state, insert
+ * renderer-produced HTML, and navigate only through DocumentView TOC targets.
  */
 
 'use strict';
@@ -10,6 +10,7 @@
 const apiUrl = 'mdview-server/api.php';
 const stateTools = window.MdviewRepositoryState;
 const readerTools = window.MdviewReaderState;
+const loginForm = window.MdviewLoginForm;
 let csrfToken = '';
 let repositories = [];
 let currentRepository = '';
@@ -20,6 +21,7 @@ let searchActive = false;
 let requestSequence = 0;
 let readerRequestSequence = 0;
 let readerState = readerTools.repository();
+let tocState = readerTools.toc([]);
 
 const loginPanel = document.querySelector('#login-panel');
 const repositoryPanel = document.querySelector('#repository-panel');
@@ -37,6 +39,11 @@ const readerErrorMessage = document.querySelector('#reader-error-message');
 const readerDocument = document.querySelector('#reader-document');
 const documentTitle = document.querySelector('#document-title');
 const documentContent = document.querySelector('#document-content');
+const tocButton = document.querySelector('#reader-toc');
+const tocOverlay = document.querySelector('#toc-overlay');
+const tocCloseButton = document.querySelector('#toc-close');
+const tocItems = document.querySelector('#toc-items');
+const tocDepthButtons = document.querySelectorAll('[data-toc-depth]');
 const statusNode = document.querySelector('#status');
 
 class ApiError extends Error {
@@ -105,6 +112,8 @@ function showLogin(message = '') {
     requestSequence++;
     readerRequestSequence++;
     readerState = readerTools.repository();
+    tocState = readerTools.toc([]);
+    document.body.classList.remove('reader-active');
     repositories = [];
     repositoryPanel.hidden = true;
     readerPanel.hidden = true;
@@ -112,6 +121,62 @@ function showLogin(message = '') {
     document.querySelector('#identity').textContent = '';
     document.querySelector('#logout').hidden = true;
     setStatus(message);
+}
+
+function renderToc() {
+    tocButton.disabled = !tocState.available;
+    tocButton.setAttribute('aria-expanded', String(tocState.open));
+    tocOverlay.hidden = !tocState.open;
+    tocItems.replaceChildren();
+
+    for (const depthButton of tocDepthButtons) {
+        const depth = Number(depthButton.dataset.tocDepth);
+        depthButton.setAttribute('aria-pressed', String(depth === tocState.depth));
+    }
+
+    for (const item of readerTools.visibleTocItems(tocState)) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `toc-item toc-level-${item.level}`;
+        button.textContent = item.title;
+        button.dataset.tocTarget = item.target;
+        button.addEventListener('click', () => navigateToTocTarget(item.target));
+        tocItems.append(button);
+    }
+}
+
+function openToc() {
+    if (!tocState.available || tocState.open) {
+        return;
+    }
+    tocState = readerTools.toggleToc(tocState);
+    renderToc();
+    tocCloseButton.focus({preventScroll: true});
+}
+
+function closeToc(restoreFocus = true) {
+    if (!tocState.open) {
+        return;
+    }
+    tocState = readerTools.closeToc(tocState);
+    renderToc();
+    if (restoreFocus) {
+        tocButton.focus({preventScroll: true});
+    }
+}
+
+function navigateToTocTarget(target) {
+    const heading = [...documentContent.querySelectorAll('[id]')]
+        .find(element => element.id === target);
+    closeToc(false);
+    if (!heading) {
+        return;
+    }
+    if (!heading.hasAttribute('tabindex')) {
+        heading.setAttribute('tabindex', '-1');
+    }
+    heading.focus({preventScroll: true});
+    heading.scrollIntoView({block: 'start'});
 }
 
 function prepareDocumentLinks() {
@@ -127,6 +192,7 @@ function prepareDocumentLinks() {
 function renderReader(nextState) {
     readerState = nextState;
     const inReader = readerState.mode === 'reader';
+    document.body.classList.toggle('reader-active', inReader);
     repositoryPanel.hidden = inReader;
     readerPanel.hidden = !inReader;
 
@@ -135,11 +201,15 @@ function renderReader(nextState) {
     readerDocument.hidden = readerState.status !== 'ready';
 
     if (readerState.status === 'loading') {
+        tocState = readerTools.toc([]);
+        renderToc();
         documentTitle.textContent = '';
         documentContent.replaceChildren();
         readerErrorMessage.textContent = '';
         document.title = 'Opening document… — MDView';
     } else if (readerState.status === 'error') {
+        tocState = readerTools.toc([]);
+        renderToc();
         documentTitle.textContent = '';
         documentContent.replaceChildren();
         readerErrorMessage.textContent = readerState.error;
@@ -149,8 +219,12 @@ function renderReader(nextState) {
         // DocumentView.content is sanitized by the selected backend renderer.
         documentContent.innerHTML = readerState.document.content;
         prepareDocumentLinks();
+        tocState = readerTools.toc(readerState.document.toc);
+        renderToc();
         document.title = `${readerState.document.title} — MDView`;
     } else {
+        tocState = readerTools.toc([]);
+        renderToc();
         document.title = 'MDView Web';
     }
 }
@@ -435,15 +509,14 @@ async function initialize() {
 
 document.querySelector('#login-form').addEventListener('submit', async event => {
     event.preventDefault();
+    const form = event.currentTarget;
     setStatus('Signing in…');
-    const values = new FormData(event.currentTarget);
     try {
-        const data = await api('login', {
+        const data = await loginForm.submit(form, credentials => api('login', {
             method: 'POST',
-            body: {username: values.get('username'), password: values.get('password')},
-        });
+            body: credentials,
+        }));
         csrfToken = data.csrf_token;
-        event.currentTarget.reset();
         await showRepositories(data.user);
     } catch (failure) {
         showError(failure);
@@ -499,6 +572,36 @@ document.querySelector('#back').addEventListener('click', () => {
     requestAnimationFrame(() => {
         listRegion.scrollTop = returnScrollTop;
     });
+});
+
+tocButton.addEventListener('click', () => {
+    if (tocState.open) {
+        closeToc();
+    } else {
+        openToc();
+    }
+});
+
+tocCloseButton.addEventListener('click', () => closeToc());
+
+tocOverlay.addEventListener('click', event => {
+    if (event.target === tocOverlay) {
+        closeToc();
+    }
+});
+
+for (const depthButton of tocDepthButtons) {
+    depthButton.addEventListener('click', () => {
+        tocState = readerTools.setTocDepth(tocState, Number(depthButton.dataset.tocDepth));
+        renderToc();
+    });
+}
+
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && tocState.open) {
+        event.preventDefault();
+        closeToc();
+    }
 });
 
 initialize().catch(showError);

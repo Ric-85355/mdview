@@ -1,8 +1,8 @@
 /*
- * app.css — created 2026-09-25, version 0.3.0.
- * Purpose: provide responsive Repository and stage-three renderer-independent Reader UIs.
- * Algorithm: use touch-sized controls, a bounded reading column, neutral document styles,
- * and local overflow for code/tables so neither mobile nor desktop pages scroll sideways.
+ * app.css — created 2026-09-25, version 0.4.0.
+ * Purpose: provide responsive Repository, Reader, and overlay TOC drawer UIs.
+ * Algorithm: use touch-sized controls, a fixed independently scrolling drawer, a bounded
+ * reading column, and local code/table overflow without horizontal page scrolling.
  */
 
 :root {
@@ -173,9 +173,11 @@ form, label { display: grid; gap: .5rem; }
 .status.notice { color: var(--muted); }
 
 .reader-panel { width: 100%; min-width: 0; }
+.reader-active .app-header { display: none; }
+.reader-active main { padding-top: 0; }
 .reader-toolbar {
     position: sticky;
-    z-index: 4;
+    z-index: 21;
     top: 0;
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
@@ -192,6 +194,91 @@ form, label { display: grid; gap: .5rem; }
 .reader-toolbar-end { justify-self: end; }
 .reader-toolbar button { min-width: 7rem; background: var(--surface); }
 .reader-toolbar button:disabled { opacity: .5; }
+.toc-overlay {
+    position: fixed;
+    z-index: 20;
+    inset: 3.6rem 0 0;
+    overflow: hidden;
+    background: #0007;
+}
+.toc-drawer {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    width: min(24rem, 88vw);
+    height: calc(100vh - 3.6rem);
+    height: calc(100dvh - 3.6rem);
+    max-width: 100%;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: .5rem 0 1.5rem #0004;
+    animation: toc-drawer-enter .18s ease-out;
+}
+@keyframes toc-drawer-enter { from { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { .toc-drawer { animation: none; } }
+.toc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 3.6rem;
+    padding: .45rem .7rem .45rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.toc-header h2 { margin: 0; font-size: 1.2rem; }
+.toc-close {
+    display: grid;
+    place-items: center;
+    min-width: 2.75rem;
+    padding: .25rem;
+    border-color: transparent;
+    background: transparent;
+    font-size: 1.6rem;
+    line-height: 1;
+}
+.toc-depth {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .65rem 1rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+}
+.toc-depth-buttons { display: flex; gap: .3rem; }
+.toc-depth-buttons button {
+    min-width: 2.75rem;
+    padding: .35rem;
+    background: transparent;
+}
+.toc-depth-buttons button[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: CanvasText;
+    font-weight: 700;
+}
+.toc-items {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: .5rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+}
+.toc-item {
+    flex: 0 0 auto;
+    min-height: 2.75rem;
+    padding: .55rem .6rem;
+    overflow-wrap: anywhere;
+    text-align: left;
+    border-color: transparent;
+    background: transparent;
+}
+.toc-item:hover,
+.toc-item:focus-visible { background: var(--surface-raised); }
+.toc-level-1 { font-weight: 650; }
+.toc-level-2 { margin-left: 1rem; }
+.toc-level-3 { margin-left: 2rem; color: var(--muted); }
 .reader-message {
     display: flex;
     flex-direction: column;
@@ -249,6 +336,7 @@ form, label { display: grid; gap: .5rem; }
     line-height: 1.25;
     overflow-wrap: anywhere;
 }
+.document-content [id] { scroll-margin-top: 4.5rem; }
 .document-content h1 { font-size: clamp(1.55rem, 4vw, 2rem); }
 .document-content h2 { font-size: clamp(1.35rem, 3.5vw, 1.7rem); }
 .document-content h3 { font-size: clamp(1.15rem, 3vw, 1.4rem); }
