@@ -1,9 +1,9 @@
 <?php
 /*
- * api.php — created 2026-09-25, version 0.1.0.
- * Purpose: expose the internal stage-one JSON API for Auth, Repository, and Reader.
- * Algorithm: start a hardened PHP session, authorize each action, delegate to one subsystem,
- * and map expected/unexpected failures to the common response envelope without path leakage.
+ * api.php — created 2026-09-25, version 0.2.0.
+ * Purpose: expose the internal JSON API for Auth, Repository, Reader, and admin mutations.
+ * Algorithm: authorize each request, validate session CSRF before writes, delegate guarded
+ * filesystem work, and map failures to the common response envelope without path leakage.
  */
 
 declare(strict_types=1);
@@ -51,6 +51,20 @@ function mdview_string(array $source, string $key, bool $required = true): strin
     return $value;
 }
 
+/** @return array{name: string, tmp_name: string, error: int} */
+function mdview_uploaded_file(string $key): array
+{
+    $file = $_FILES[$key] ?? null;
+    if (!is_array($file)
+        || !isset($file['name'], $file['tmp_name'], $file['error'])
+        || !is_string($file['name'])
+        || !is_string($file['tmp_name'])
+        || !is_int($file['error'])) {
+        throw new ApiException('invalid_upload', 400, 'One uploaded file is required');
+    }
+    return ['name' => $file['name'], 'tmp_name' => $file['tmp_name'], 'error' => $file['error']];
+}
+
 try {
     $services = mdview_services();
     $auth = $services['auth'];
@@ -77,6 +91,37 @@ try {
         $csrf->validate($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($body['csrf_token'] ?? null));
         $auth->logout();
         JsonResponse::sendSuccess(['logged_out' => true, 'csrf_token' => $csrf->rotate()]);
+    }
+
+    if ($action === 'create_directory' && $method === 'POST') {
+        $auth->requireUser();
+        $body = mdview_request_body();
+        $repository = mdview_string($body, 'repository');
+        $auth->requireWrite($repository);
+        $csrf->validate($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($body['csrf_token'] ?? null));
+        $created = $repositories->createDirectory(
+            $repository,
+            mdview_string($body, 'path', false),
+            mdview_string($body, 'name'),
+        );
+        JsonResponse::sendSuccess(['directory' => $created], 201);
+    }
+
+    if ($action === 'upload' && $method === 'POST') {
+        $auth->requireUser();
+        $body = mdview_request_body();
+        $repository = mdview_string($body, 'repository');
+        $auth->requireWrite($repository);
+        $csrf->validate($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($body['csrf_token'] ?? null));
+        $file = mdview_uploaded_file('file');
+        $uploaded = $repositories->upload(
+            $repository,
+            mdview_string($body, 'path', false),
+            $file['name'],
+            $file['tmp_name'],
+            $file['error'],
+        );
+        JsonResponse::sendSuccess(['file' => $uploaded], 201);
     }
 
     if ($method !== 'GET') {

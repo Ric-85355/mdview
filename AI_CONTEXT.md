@@ -192,7 +192,7 @@ placeholder-файлов.
 copy/move, recursive delete, multi-select, SFTP key auth и ручной fingerprint
 verification. Share поддерживает только один файл; `ACTION_SEND_MULTIPLE` и batch upload нет.
 
-## Web-версия: этапы 1–4B
+## Web-версия: этапы 1–4B и 5A
 
 В `web/` создан минимальный фундамент MDView Web для PHP 8.1+ и обычного shared hosting.
 Deployment layout совпадает с архитектурой: `mdview.php` размещается в `repository-root`,
@@ -209,6 +209,11 @@ Deployment layout совпадает с архитектурой: `mdview.php` �
 - `config/*.example.php` — безопасные шаблоны; реальные `app.php`/`users.php` игнорируются Git;
 - `assets/` и `mdview.php` — адаптивные HTML/CSS/vanilla-JS Repository и Reader UI.
 
+Все CSS/JavaScript assets, подключаемые браузером из `mdview.php`, используют единый
+детерминированный cache-busting query из `MDVIEW_WEB_VERSION` (`?v=0.6.0`). При смене Web-версии
+или deployment изменённых frontend assets эту константу нужно обновлять вместе с файлами;
+физические имена assets не меняются.
+
 `repository-root` задаётся явно в ignored `config/app.php` или `MDVIEW_REPOSITORY_ROOT`.
 `PathGuard` повторно URL-decode'ит вход, отклоняет absolute paths, `..`, separators/
 encoded traversal и после `realpath()` проверяет границу конкретного repository. Внешние symlink не видны
@@ -220,8 +225,9 @@ Markdown обрабатывается pinned `erusev/parsedown` 1.8.0 (MIT), ven
 строит стабильные Unicode heading targets и TOC H1–H3 и возвращает `title/content/toc/metadata`.
 
 Доступны API actions: public `csrf`; CSRF-protected `login`/`logout`; authenticated `session`,
-`repositories`, `directory`, `search` и `document`. Мутирующих Repository endpoints на этапе нет,
-но `AuthService::requireWrite()`, CSRF и HTTP 409 conflict infrastructure готовы для этапа 5.
+`repositories`, `directory`, `search` и `document`; admin-only CSRF-protected POST `create_directory`
+и multipart POST `upload`. Каждый write request повторно проверяет session, repository grant,
+`AuthService::requireWrite()` и CSRF на backend. `user` остаётся read-only.
 Проверки: `php web/tests/run.php`, `php web/tests/http_smoke.php`, PHP lint всех `.php`.
 
 Этап 2 добавил полноценный Repository UI: верхнюю панель с разрешённым backend-ом
@@ -273,8 +279,18 @@ Markdown/HTML для построения оглавления и не синх�
 repository id и логического document path. Scroll save debounced с задержкой 200 ms. При повторном
 открытии offset восстанавливается один раз и ограничивается текущей высотой страницы.
 Явный переход к TOC target или search match имеет приоритет над отложенным restore. Backend и
-`DocumentView` не менялись. Upload/New folder/Rename/Move/Delete и активные контекстные
-меню остаются для этапа 5.
+`DocumentView` не менялись.
+
+Этап 5A активировал `New folder` и `Upload` в Repository menu только для identity с
+`can_write=true`; frontend-состояние не является security boundary. New folder принимает
+одно UTF-8 имя и создаёт только direct child текущего каталога. Upload принимает ровно
+один `multipart/form-data` файл любого типа, проверяет PHP upload status/
+`is_uploaded_file()` и не доверяет MIME. `PathGuard` разрешает new destination только как
+один безопасный basename внутри канонического existing parent. Upload destination открывается
+эксклюзивно (`xb`), поэтому existing file не перезаписывается; name conflict возвращает HTTP 409.
+После успеха UI повторно загружает тот же repository/path и по возможности восстанавливает
+scroll. Отмена picker/dialog не делает request. Upload пока single-file; overwrite, multiple upload,
+drag-and-drop, Rename, Move и Delete не реализованы.
 
 Hostinger smoke-test выявил и исправил frontend-регрессию login submit: браузер может очистить
 `SubmitEvent.currentTarget` после первого `await`. Submit handler синхронно сохраняет ссылку на

@@ -173,6 +173,20 @@ Do not commit or modify build artifacts, caches, binaries, temporary files, or l
 
 Respect `.gitignore`.
 
+### 10.1. Browser cache invalidation for web assets
+
+When changing browser-loaded static assets such as JavaScript, CSS, or other frontend resources, consider whether deployment caches, CDNs, reverse proxies, service workers, or browser caches could continue serving an older version after deployment.
+
+If the project already has an established asset-versioning, fingerprinting, hashing, or cache-busting mechanism, preserve and use it consistently.
+
+If directly referenced frontend assets do not have content-hashed filenames or another established invalidation mechanism, add a deterministic cache-busting version to their URLs, for example a release/build version query parameter such as `?v=1.2.3`.
+
+When the relevant frontend assets change, update the cache-busting version consistently for all affected references.
+
+Do not rely on users performing a hard refresh, clearing browser caches, or opening a private window in order to receive the current deployed frontend.
+
+Do not rename physical asset files solely for cache invalidation unless that matches the project's existing conventions or build system.
+
 ---
 
 ## 11. Configuration and secrets

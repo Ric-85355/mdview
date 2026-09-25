@@ -1,8 +1,8 @@
 /*
- * app.js — created 2026-09-25, version 0.5.0.
- * Purpose: provide Auth, Repository, Reader, TOC, search, and reading-position UI.
- * Algorithm: render explicit modes, decorate visible text nodes with transient search marks,
- * and persist debounced per-document scroll offsets without changing DocumentView data.
+ * app.js — created 2026-09-25, version 0.6.0.
+ * Purpose: provide Auth, Repository admin mutations, Reader, TOC, search, and positions.
+ * Algorithm: render explicit modes, send authorized JSON/multipart operations, refresh the
+ * current directory after writes, and preserve independent Reader and Repository state.
  */
 
 'use strict';
@@ -13,7 +13,9 @@ const readerTools = window.MdviewReaderState;
 const loginForm = window.MdviewLoginForm;
 const documentSearchTools = window.MdviewDocumentSearch;
 const readingPositionTools = window.MdviewReadingPosition;
+const mutationTools = window.MdviewRepositoryMutations;
 let csrfToken = '';
+let currentUser = null;
 let repositories = [];
 let currentRepository = '';
 let currentPath = '';
@@ -30,6 +32,7 @@ let activeDocument = null;
 let documentNavigationVersion = 0;
 let readingRestoreSequence = 0;
 let readingSaveTimer = null;
+let mutationBusy = false;
 
 const loginPanel = document.querySelector('#login-panel');
 const repositoryPanel = document.querySelector('#repository-panel');
@@ -41,6 +44,16 @@ const listRegion = document.querySelector('#entry-list-region');
 const searchForm = document.querySelector('#repository-search');
 const searchInput = document.querySelector('#search-query');
 const clearSearchButton = document.querySelector('#clear-search');
+const repositoryMenu = document.querySelector('#repository-menu');
+const newFolderAction = document.querySelector('#new-folder-action');
+const uploadAction = document.querySelector('#upload-action');
+const uploadInput = document.querySelector('#upload-input');
+const newFolderDialog = document.querySelector('#new-folder-dialog');
+const newFolderForm = document.querySelector('#new-folder-form');
+const newFolderName = document.querySelector('#new-folder-name');
+const newFolderError = document.querySelector('#new-folder-error');
+const newFolderCancel = document.querySelector('#new-folder-cancel');
+const newFolderSubmit = document.querySelector('#new-folder-submit');
 const readerLoading = document.querySelector('#reader-loading');
 const readerError = document.querySelector('#reader-error');
 const readerErrorMessage = document.querySelector('#reader-error-message');
@@ -73,13 +86,22 @@ class ApiError extends Error {
 
 async function api(action, options = {}) {
     const query = new URLSearchParams({action, ...(options.query || {})});
+    const formData = options.formData || null;
+    const jsonBody = options.body ? JSON.stringify(options.body) : undefined;
+    const headers = {};
+    if (options.body) {
+        headers['Content-Type'] = 'application/json';
+    }
+    if (options.body || formData) {
+        headers['X-CSRF-Token'] = csrfToken;
+    }
     let response;
     try {
         response = await fetch(`${apiUrl}?${query}`, {
             method: options.method || 'GET',
             credentials: 'same-origin',
-            headers: options.body ? {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken} : {},
-            body: options.body ? JSON.stringify(options.body) : undefined,
+            headers,
+            body: formData || jsonBody,
         });
     } catch (failure) {
         throw new ApiError('Could not reach the server', 0, 'network_error');
@@ -118,10 +140,54 @@ function setStatus(message = '') {
 function setLoading(message) {
     setStatus(message);
     repositoryPanel.setAttribute('aria-busy', 'true');
+    renderMutationActions();
 }
 
 function finishLoading() {
     repositoryPanel.removeAttribute('aria-busy');
+    renderMutationActions();
+}
+
+function renderMutationActions() {
+    const actions = mutationTools.actionsFor(currentUser);
+    const unavailable = mutationBusy || repositoryPanel.hasAttribute('aria-busy') || currentRepository === '';
+    newFolderAction.disabled = unavailable || !actions.createDirectory;
+    uploadAction.disabled = unavailable || !actions.upload;
+    newFolderSubmit.disabled = mutationBusy;
+    repositoryMenu.setAttribute('aria-busy', String(mutationBusy));
+}
+
+function setMutationBusy(busy, message = '') {
+    mutationBusy = busy;
+    renderMutationActions();
+    if (message !== '') {
+        setStatus(message);
+    }
+}
+
+async function executeRepositoryMutation(operation, progressMessage, successMessage) {
+    if (mutationBusy) {
+        return 'busy';
+    }
+    const repository = currentRepository;
+    const path = currentPath;
+    const restoreScroll = listRegion.scrollTop;
+    setMutationBusy(true, progressMessage);
+    try {
+        await mutationTools.execute(operation, () => openDirectory(repository, path, {restoreScroll}));
+        setStatus(successMessage);
+        return 'success';
+    } catch (failure) {
+        if (failure?.mutationCompleted === true) {
+            showError(new Error(`${successMessage}, but the folder could not be refreshed`));
+            return 'completed';
+        } else {
+            showError(failure);
+            return 'failed';
+        }
+    } finally {
+        setMutationBusy(false);
+    }
 }
 
 function clearDocumentSearchHighlights() {
@@ -248,6 +314,13 @@ function showLogin(message = '') {
     cancelReadingRestore();
     activeDocument = null;
     resetDocumentSearch();
+    currentUser = null;
+    currentRepository = '';
+    mutationBusy = false;
+    if (newFolderDialog.open) {
+        newFolderDialog.close();
+    }
+    renderMutationActions();
     document.body.classList.remove('reader-active');
     repositories = [];
     repositoryPanel.hidden = true;
@@ -496,6 +569,7 @@ async function openDirectory(repository, path, options = {}) {
         }
         currentRepository = repository;
         currentPath = data.path;
+        renderMutationActions();
         currentScrollTop = options.restoreScroll || 0;
         returnScrollTop = currentScrollTop;
         searchActive = false;
@@ -541,6 +615,8 @@ async function restoreDirectory(savedState) {
 }
 
 async function showRepositories(user) {
+    currentUser = user;
+    renderMutationActions();
     loginPanel.hidden = true;
     renderReader(readerTools.repository());
     document.querySelector('#identity').textContent = `${user.username} (${user.role})`;
@@ -674,6 +750,68 @@ document.querySelector('#logout').addEventListener('click', async () => {
     } catch (failure) {
         showError(failure);
     }
+});
+
+newFolderAction.addEventListener('click', () => {
+    if (newFolderAction.disabled) {
+        return;
+    }
+    repositoryMenu.open = false;
+    newFolderForm.reset();
+    newFolderError.textContent = '';
+    newFolderDialog.showModal();
+    newFolderName.focus();
+});
+
+newFolderCancel.addEventListener('click', () => newFolderDialog.close());
+
+newFolderDialog.addEventListener('close', () => {
+    newFolderForm.reset();
+    newFolderError.textContent = '';
+});
+
+newFolderForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    let body;
+    try {
+        body = mutationTools.createDirectoryBody(currentRepository, currentPath, newFolderName.value);
+    } catch (failure) {
+        newFolderError.textContent = failure instanceof Error ? failure.message : 'Invalid folder name';
+        return;
+    }
+    newFolderError.textContent = '';
+    const outcome = await executeRepositoryMutation(
+        () => api('create_directory', {method: 'POST', body}),
+        'Creating folder…',
+        'Folder created',
+    );
+    if (outcome === 'success' || outcome === 'completed') {
+        newFolderDialog.close();
+    } else if (newFolderDialog.open) {
+        newFolderError.textContent = statusNode.textContent;
+    }
+});
+
+uploadAction.addEventListener('click', () => {
+    if (uploadAction.disabled) {
+        return;
+    }
+    repositoryMenu.open = false;
+    uploadInput.click();
+});
+
+uploadInput.addEventListener('change', async () => {
+    const file = uploadInput.files?.[0] || null;
+    const formData = mutationTools.uploadFormData(currentRepository, currentPath, file);
+    uploadInput.value = '';
+    if (formData === null) {
+        return;
+    }
+    await executeRepositoryMutation(
+        () => api('upload', {method: 'POST', formData}),
+        'Uploading…',
+        'File uploaded',
+    );
 });
 
 repositorySelect.addEventListener('change', () => {

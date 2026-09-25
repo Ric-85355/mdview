@@ -1,9 +1,9 @@
 <?php
 /*
- * PathGuard.php — created 2026-09-25, version 0.1.0.
- * Purpose: confine every repository read to a configured physical repository root.
- * Algorithm: repeatedly decode input, reject unsafe segments, resolve canonical paths,
- * and require both repositories and descendants to remain within their allowed roots.
+ * PathGuard.php — created 2026-09-25, version 0.2.0.
+ * Purpose: confine every repository read and write to a configured physical repository root.
+ * Algorithm: decode and validate logical paths, resolve existing parents canonically, and
+ * accept new objects only as one safe direct child of a contained directory.
  */
 
 declare(strict_types=1);
@@ -80,6 +80,31 @@ final class PathGuard
         return $resolved;
     }
 
+    /**
+     * Resolve an existing contained parent and one validated child name for a new object.
+     *
+     * @return array{repository_path: string, parent_path: string, name: string, destination: string}
+     */
+    public function resolveNewChild(string $repository, string $relativeParent, string $name): array
+    {
+        $repositoryPath = $this->repositoryPath($repository);
+        $parentPath = $this->resolveExisting($repository, $relativeParent);
+        if (!is_dir($parentPath)) {
+            throw new ApiException('not_a_directory', 400, 'Requested path is not a directory');
+        }
+        if (!$this->isWithin($parentPath, $repositoryPath)) {
+            throw new ApiException('path_forbidden', 403, 'Path leaves the repository');
+        }
+
+        $safeName = $this->childName($name);
+        return [
+            'repository_path' => $repositoryPath,
+            'parent_path' => $parentPath,
+            'name' => $safeName,
+            'destination' => $parentPath . DIRECTORY_SEPARATOR . $safeName,
+        ];
+    }
+
     public function relativePath(string $path): string
     {
         $decoded = $path;
@@ -107,6 +132,26 @@ final class PathGuard
             }
         }
         return implode('/', $segments);
+    }
+
+    /** Validate and normalize one UTF-8 basename without accepting a path. */
+    public function childName(string $name): string
+    {
+        if ($name === '' || trim($name) === '' || str_contains($name, '/') || str_contains($name, '\\')) {
+            throw new ApiException('invalid_name', 400, 'Name must be one non-empty path segment');
+        }
+        if (!mb_check_encoding($name, 'UTF-8')) {
+            throw new ApiException('invalid_name', 400, 'Name must be valid UTF-8');
+        }
+        try {
+            $normalized = $this->relativePath($name);
+        } catch (ApiException $failure) {
+            throw new ApiException('invalid_name', 400, 'Name must be one non-empty path segment', $failure);
+        }
+        if ($normalized === '' || str_contains($normalized, '/')) {
+            throw new ApiException('invalid_name', 400, 'Name must be one non-empty path segment');
+        }
+        return $normalized;
     }
 
     public function isWithinRepository(string $resolvedPath, string $repositoryPath): bool

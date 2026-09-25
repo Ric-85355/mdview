@@ -1,8 +1,9 @@
 # MDView Web
 
-This directory contains completed Web MDView stages 1–4: the PHP foundation,
+This directory contains completed Web MDView stages 1–4 and stage 5A: the PHP foundation,
 responsive Repository UI, renderer-independent Reader UI, TOC drawer, document
-search, and browser-local reading positions. After authentication, the browser
+search, browser-local reading positions, and admin directory creation/single-file
+upload. After authentication, the browser
 can select any server-authorized repository, navigate folders through
 breadcrumbs, search file and folder names, and open Markdown through the
 adaptive `DocumentView` Reader. Repository location and list scroll are kept
@@ -15,10 +16,10 @@ with H1–H3 depth controls and navigation by `DocumentView.toc` targets. Search
 works on displayed document text without a backend request, highlights all
 matches, provides cyclic Previous/Next navigation and removes its temporary
 markup when cleared or closed. Per-document scroll offsets use a versioned
-`localStorage` key built from repository and logical document path. All repository mutations belong to
-later stages in `docs/MD-WEB-implementation-plan.md`. The visible Repository
-and item menus reserve their eventual locations, but their mutation commands
-are disabled.
+`localStorage` key built from repository and logical document path. Repository
+admins can create one immediate child folder or upload one arbitrary file into
+the current folder. Read-only users cannot invoke these actions. Rename, Move,
+Delete, overwrite, and multiple/drag-and-drop upload remain unimplemented.
 
 ## Layout
 
@@ -40,6 +41,7 @@ web/
     ├── document_search_dom_test.html # real DOM highlight integrity test
     ├── reader_state_test.js       # Reader, DocumentView, and TOC state tests
     ├── reading_position_test.js   # per-document position persistence tests
+    ├── repository_mutations_test.js # admin action/payload/refresh tests
     └── repository_state_test.js  # browser-independent client-state tests
 ```
 
@@ -47,6 +49,11 @@ For Hostinger deployment, place `mdview.php` at `repository-root/mdview.php`
 and the complete `mdview-server/` directory at
 `repository-root/mdview-server/`. User repositories remain ordinary sibling
 directories and are never copied into this Git repository.
+
+Browser-loaded CSS and JavaScript URLs use the shared deterministic version
+query from `MDVIEW_WEB_VERSION` in `mdview.php` (currently `?v=0.6.0`). Whenever
+the Web version or deployed frontend assets change, update that constant so
+browsers and hosting caches request the new asset URLs without a hard refresh.
 
 ## Configuration
 
@@ -97,9 +104,14 @@ Implemented actions:
 | GET | `directory` | yes | List `repository` + relative `path` |
 | GET | `search` | yes | Name-only search using `query` |
 | GET | `document` | yes | Render Markdown `DocumentView` |
+| POST | `create_directory` | admin; CSRF required | Create one direct child directory |
+| POST multipart | `upload` | admin; CSRF required | Upload one file without overwrite |
 
-CSRF infrastructure is ready for all future mutating endpoints. No mutation
-endpoint is implemented in stage 1.
+Every write rechecks authentication, repository access, the admin role, CSRF,
+and guarded relative paths on the backend. Upload uses the browser filename only
+after single-segment validation; MIME type is not trusted. Existing targets return
+HTTP 409 and are never overwritten. PHP's configured upload/post-size limits still apply.
+The hosting PHP user needs write permission on user repository directories.
 
 ## Local verification
 
@@ -113,11 +125,13 @@ node web/tests/reader_state_test.js
 node web/tests/login_form_test.js
 node web/tests/document_search_test.js
 node web/tests/reading_position_test.js
+node web/tests/repository_mutations_test.js
 node --check web/mdview-server/assets/repository-state.js
 node --check web/mdview-server/assets/reader-state.js
 node --check web/mdview-server/assets/login-form.js
 node --check web/mdview-server/assets/document-search.js
 node --check web/mdview-server/assets/reading-position.js
+node --check web/mdview-server/assets/repository-mutations.js
 node --check web/mdview-server/assets/app.js
 find web -name '*.php' -print0 | xargs -0 -n1 php -l
 ```

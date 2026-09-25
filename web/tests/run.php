@@ -1,7 +1,7 @@
 <?php
 /*
- * run.php — created 2026-09-25, version 0.1.0.
- * Purpose: test Web MDView foundation without PHPUnit, Composer, network, or real repositories.
+ * run.php — created 2026-09-25, version 0.2.0.
+ * Purpose: test Web MDView reads, authorization, rendering, and guarded mutations.
  * Algorithm: build an isolated temporary repository tree, execute pure/service checks,
  * report each case, and remove only the uniquely generated temporary test directory.
  */
@@ -143,6 +143,65 @@ $tests['empty directories remain navigable'] = static function () use ($reposito
     $empty = $repositories->listDirectory('Alpha', 'Z Empty');
     assert_same('Z Empty', $empty['path'], 'Directory path mismatch');
     assert_same([], $empty['entries'], 'Empty directory should return an empty entry list');
+};
+$tests['create directory accepts one UTF-8 child inside the current path'] = static function () use ($repositories, $root): void {
+    $created = $repositories->createDirectory('Alpha', 'Folder With Space', '  Тестовый каталог  ');
+    assert_same('Folder With Space/  Тестовый каталог  ', $created['path'], 'Created path mismatch');
+    assert_true(is_dir($root . '/Alpha/Folder With Space/  Тестовый каталог  '), 'Directory not created');
+};
+$tests['create directory rejects conflicts traversal and symlink escape'] = static function () use ($repositories): void {
+    assert_api_error('conflict', 409, static fn () => $repositories->createDirectory('Alpha', '', 'README.md'));
+    foreach (['', '   ', '.', '..', 'one/two', '../outside', 'one\\two', '%2e%2e'] as $unsafe) {
+        assert_api_error('invalid_name', 400, static fn () => $repositories->createDirectory('Alpha', '', $unsafe));
+    }
+    assert_api_error('path_forbidden', 403, static fn () => $repositories->createDirectory('Alpha', 'escape', 'child'));
+};
+$tests['upload stores one UTF-8 file in current directory without overwrite'] = static function () use ($repositories, $root, $base): void {
+    $temporary = $base . '/incoming-upload';
+    file_put_contents($temporary, "uploaded \x00 bytes\n");
+    $uploaded = $repositories->upload(
+        'Alpha',
+        'Folder With Space',
+        'Новый файл.bin',
+        $temporary,
+        UPLOAD_ERR_OK,
+        static fn (string $path): bool => $path === $temporary,
+    );
+    assert_same('Folder With Space/Новый файл.bin', $uploaded['path'], 'Uploaded path mismatch');
+    assert_same("uploaded \x00 bytes\n", file_get_contents($root . '/Alpha/Folder With Space/Новый файл.bin'), 'Uploaded content mismatch');
+    $listed = $repositories->listDirectory('Alpha', 'Folder With Space');
+    $uploadedEntry = array_values(array_filter(
+        $listed['entries'],
+        static fn (array $entry): bool => $entry['name'] === 'Новый файл.bin',
+    ))[0] ?? null;
+    assert_true(is_array($uploadedEntry) && $uploadedEntry['readable'] === false, 'Unsupported upload should remain visible but unreadable');
+
+    file_put_contents($temporary, 'replacement');
+    assert_api_error('conflict', 409, static fn () => $repositories->upload(
+        'Alpha', '', 'README.md', $temporary, UPLOAD_ERR_OK, static fn (): bool => true,
+    ));
+    assert_true(str_starts_with((string) file_get_contents($root . '/Alpha/README.md'), '## Before'), 'Existing file was changed');
+};
+$tests['upload rejects invalid destination and invalid PHP upload'] = static function () use ($repositories, $base): void {
+    $temporary = $base . '/unsafe-upload';
+    file_put_contents($temporary, 'unsafe');
+    assert_api_error('not_found', 404, static fn () => $repositories->upload(
+        'Alpha', 'missing', 'file.bin', $temporary, UPLOAD_ERR_OK, static fn (): bool => true,
+    ));
+    assert_api_error('path_forbidden', 403, static fn () => $repositories->upload(
+        'Alpha', 'escape', 'file.bin', $temporary, UPLOAD_ERR_OK, static fn (): bool => true,
+    ));
+    foreach (['../file.bin', 'folder/file.bin', '/file.bin', 'folder\\file.bin'] as $unsafe) {
+        assert_api_error('invalid_name', 400, static fn () => $repositories->upload(
+            'Alpha', '', $unsafe, $temporary, UPLOAD_ERR_OK, static fn (): bool => true,
+        ));
+    }
+    assert_api_error('invalid_upload', 400, static fn () => $repositories->upload(
+        'Alpha', '', 'file.bin', $temporary, UPLOAD_ERR_OK, static fn (): bool => false,
+    ));
+    assert_api_error('upload_failed', 400, static fn () => $repositories->upload(
+        'Alpha', '', 'file.bin', $temporary, UPLOAD_ERR_PARTIAL, static fn (): bool => true,
+    ));
 };
 $tests['repository list obeys current user grants'] = static function () use ($repositories): void {
     $visible = $repositories->listRepositories(static fn (string $name): bool => $name === 'Alpha');

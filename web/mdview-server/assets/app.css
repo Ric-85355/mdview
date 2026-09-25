@@ -1,6 +1,6 @@
 /*
- * app.css — created 2026-09-25, version 0.5.0.
- * Purpose: provide responsive Repository, Reader, TOC, and document-search UIs.
+ * app.css — created 2026-09-25, version 0.6.0.
+ * Purpose: provide responsive Repository mutations, Reader, TOC, and search UIs.
  * Algorithm: use touch-sized controls, a fixed independently scrolling drawer, a bounded
  * reading column, and local code/table overflow without horizontal page scrolling.
  */
@@ -100,6 +100,21 @@ form, label { display: grid; gap: .5rem; }
     box-shadow: 0 .5rem 1.4rem #0003;
 }
 .menu-popover button { text-align: left; border: 0; background: transparent; }
+
+.repository-dialog {
+    width: min(28rem, calc(100vw - 2rem));
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: .65rem;
+    background: var(--surface);
+    color: CanvasText;
+    box-shadow: 0 1rem 3rem #0005;
+}
+.repository-dialog::backdrop { background: #0008; }
+.repository-dialog form { gap: .8rem; padding: 1rem; }
+.repository-dialog h2 { margin: 0 0 .25rem; font-size: 1.25rem; }
+.dialog-error { min-height: 1.25rem; margin: 0; color: var(--danger); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 
 .breadcrumbs {
     display: flex;

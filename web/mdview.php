@@ -1,19 +1,21 @@
 <?php
 /*
- * mdview.php — created 2026-09-25, version 0.5.0.
- * Purpose: provide the Web MDView entry point with Repository and complete reading UI.
+ * mdview.php — created 2026-09-25, version 0.6.0.
+ * Purpose: provide Web MDView Repository, admin create/upload, and reading UI.
  * Algorithm: serve an accessible application shell whose vanilla-JS client authenticates,
  * navigates repositories and displays renderer-independent DocumentView responses.
  */
 
 declare(strict_types=1);
+
+const MDVIEW_WEB_VERSION = '0.6.0';
 ?><!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MDView Web</title>
-    <link rel="stylesheet" href="mdview-server/assets/app.css">
+    <link rel="stylesheet" href="mdview-server/assets/app.css?v=<?= MDVIEW_WEB_VERSION ?>">
 </head>
 <body>
 <header class="app-header">
@@ -46,10 +48,11 @@ declare(strict_types=1);
             <details id="repository-menu" class="menu">
                 <summary aria-label="Repository menu">&#8942;</summary>
                 <div class="menu-popover" role="menu">
-                    <button type="button" role="menuitem" disabled>New folder</button>
-                    <button type="button" role="menuitem" disabled>Upload</button>
+                    <button id="new-folder-action" type="button" role="menuitem" disabled>New folder</button>
+                    <button id="upload-action" type="button" role="menuitem" disabled>Upload</button>
                 </div>
             </details>
+            <input id="upload-input" type="file" hidden>
         </div>
 
         <nav id="breadcrumbs" class="breadcrumbs" aria-label="Current path"></nav>
@@ -59,6 +62,19 @@ declare(strict_types=1);
             <div id="empty-state" class="empty-state" hidden></div>
         </div>
     </section>
+
+    <dialog id="new-folder-dialog" class="repository-dialog" aria-labelledby="new-folder-title">
+        <form id="new-folder-form">
+            <h2 id="new-folder-title">New folder</h2>
+            <label for="new-folder-name">Folder name</label>
+            <input id="new-folder-name" name="name" autocomplete="off" required>
+            <p id="new-folder-error" class="dialog-error" role="alert"></p>
+            <div class="dialog-actions">
+                <button id="new-folder-cancel" class="quiet-button" type="button">Cancel</button>
+                <button id="new-folder-submit" type="submit">Create</button>
+            </div>
+        </form>
+    </dialog>
 
     <section id="reader-panel" class="reader-panel" hidden aria-label="Document reader">
         <div class="reader-toolbar" aria-label="Reader controls">
@@ -119,11 +135,12 @@ declare(strict_types=1);
 
     <p id="status" role="status" aria-live="polite"></p>
 </main>
-<script src="mdview-server/assets/repository-state.js"></script>
-<script src="mdview-server/assets/reader-state.js"></script>
-<script src="mdview-server/assets/login-form.js"></script>
-<script src="mdview-server/assets/document-search.js"></script>
-<script src="mdview-server/assets/reading-position.js"></script>
-<script src="mdview-server/assets/app.js"></script>
+<script src="mdview-server/assets/repository-state.js?v=<?= MDVIEW_WEB_VERSION ?>"></script>
+<script src="mdview-server/assets/reader-state.js?v=<?= MDVIEW_WEB_VERSION ?>"></script>
+<script src="mdview-server/assets/login-form.js?v=<?= MDVIEW_WEB_VERSION ?>"></script>
+<script src="mdview-server/assets/document-search.js?v=<?= MDVIEW_WEB_VERSION ?>"></script>
+<script src="mdview-server/assets/reading-position.js?v=<?= MDVIEW_WEB_VERSION ?>"></script>
+<script src="mdview-server/assets/repository-mutations.js?v=<?= MDVIEW_WEB_VERSION ?>"></script>
+<script src="mdview-server/assets/app.js?v=<?= MDVIEW_WEB_VERSION ?>"></script>
 </body>
 </html>
