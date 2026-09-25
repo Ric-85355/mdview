@@ -23,7 +23,8 @@
 ## Цель проекта
 
 Лёгкий read-only просмотрщик Markdown-файлов с Python- и C-
-TUI-реализациями для Linux и самостоятельной Android-реализацией.
+TUI-реализациями для Linux, самостоятельной Android-реализацией
+и поэтапно развиваемой PHP/vanilla-JS Web-версией.
 
 Основной сценарий использования — чтение технической документации и справочных Markdown-файлов с быстрым переходом между разделами через оглавление и поиском по тексту.
 
@@ -190,6 +191,43 @@ placeholder-файлов.
 Ограничения этапа: один репозиторий, нет Sources, repository search, offline cache,
 copy/move, recursive delete, multi-select, SFTP key auth и ручной fingerprint
 verification. Share поддерживает только один файл; `ACTION_SEND_MULTIPLE` и batch upload нет.
+
+## Web-версия: этап 1
+
+В `web/` создан минимальный фундамент MDView Web для PHP 8.1+ и обычного shared hosting.
+Deployment layout совпадает с архитектурой: `mdview.php` размещается в `repository-root`,
+а backend, assets, config templates и dependency — в `mdview-server/`. Реальные репозитории в Git не добавляются.
+
+Структура Web backend:
+
+- `mdview-server/api.php` — единая JSON-точка с оболочками `success/data` и `success/error`;
+- `src/Auth/` — `password_verify()`, PHP session, роли `admin`/`user`, grants на repository и `*`,
+  server-side read/write checks и session-bound CSRF token;
+- `src/Repository/` — discovery пользовательских репозиториев, directory listing и name-only search;
+- `src/Reader/` — открытие логического пути через renderer registry и контракт `DocumentView`;
+- `src/Renderer/` — общий renderer interface/registry и Markdown renderer;
+- `config/*.example.php` — безопасные шаблоны; реальные `app.php`/`users.php` игнорируются Git;
+- `assets/` и `mdview.php` — только технический HTML/CSS/vanilla-JS frontend для проверки login,
+  repository navigation и Reader; это не окончательный UI.
+
+`repository-root` задаётся явно в ignored `config/app.php` или `MDVIEW_REPOSITORY_ROOT`.
+`PathGuard` повторно URL-decode'ит вход, отклоняет absolute paths, `..`, separators/
+encoded traversal и после `realpath()` проверяет границу конкретного repository. Внешние symlink не видны
+в list/search и не открываются. Reserved `mdview-server` и configured service names не считаются repository
+даже для admin. Apache `.htaccess` дополнительно закрывает config/src/dependency от прямого HTTP.
+
+Markdown обрабатывается pinned `erusev/parsedown` 1.8.0 (MIT), vendored одним файлом
+без Composer/runtime dependencies. Renderer включает safe + strict mode, проверяет UTF-8,
+строит стабильные Unicode heading targets и TOC H1–H3 и возвращает `title/content/toc/metadata`.
+
+Доступны API actions: public `csrf`; CSRF-protected `login`/`logout`; authenticated `session`,
+`repositories`, `directory`, `search` и `document`. Мутирующих Repository endpoints на этапе нет,
+но `AuthService::requireWrite()`, CSRF и HTTP 409 conflict infrastructure готовы для этапа 5.
+Проверки: `php web/tests/run.php`, `php web/tests/http_smoke.php`, PHP lint всех `.php`.
+
+Следующий этап по `docs/MD-WEB-implementation-plan.md` — полноценный Repository UI:
+выбор репозитория, просмотр/навигация каталогов, name search, открытие документа
+и восстановление Repository state. Reader UI, TOC/search/localStorage и mutations остаются для этапов 3–5.
 
 ## Текущий статус
 

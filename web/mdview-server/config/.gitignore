@@ -1,0 +1,3 @@
+# Local deployment configuration can contain absolute paths and password hashes.
+app.php
+users.php

@@ -1,0 +1,24 @@
+/*
+ * app.css — created 2026-09-25, version 0.1.0.
+ * Purpose: keep the stage-one verification UI readable without defining final product visuals.
+ * Algorithm: apply a compact responsive column, neutral controls, and safe document wrapping.
+ */
+
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; }
+header { display: flex; gap: 1rem; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid #8886; }
+header #identity { margin-left: auto; }
+main { width: min(960px, calc(100% - 2rem)); margin: 1rem auto; }
+form, label { display: grid; gap: .5rem; }
+form { max-width: 24rem; }
+button, input { font: inherit; padding: .45rem .65rem; }
+#repositories { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.path-row { display: flex; align-items: center; gap: .75rem; }
+#entries { padding: 0; list-style: none; }
+#entries button { width: 100%; text-align: left; border: 0; border-bottom: 1px solid #8884; background: transparent; }
+#toc { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; margin-bottom: 1rem; }
+#toc a { margin-left: calc((var(--level) - 1) * 1rem); }
+#document-content { line-height: 1.55; overflow-wrap: anywhere; }
+#document-content pre { overflow: auto; padding: .75rem; background: #8882; }
+#document-content img { max-width: 100%; }
+#status.error { color: #c62828; }

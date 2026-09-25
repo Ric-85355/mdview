@@ -1,0 +1,7 @@
+# .htaccess — created 2026-09-25, version 0.1.0.
+# Purpose: expose only API and static assets from the service directory on Apache hosting.
+# Algorithm: disable indexes and reject direct HTTP access to code, config, and dependency trees.
+
+Options -Indexes
+RewriteEngine On
+RewriteRule ^(?:bootstrap\.php|config(?:/|$)|src(?:/|$)|third-party(?:/|$)) - [F,L,NC]
