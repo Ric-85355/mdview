@@ -166,6 +166,13 @@ try {
     smoke_assert($document['payload']['data']['document']['title'] === 'Hello', 'DocumentView title mismatch');
     smoke_assert(isset($document['payload']['data']['document']['content']), 'DocumentView content missing');
 
+    $missingDocument = smoke_request(
+        $baseUrl . '?action=document&repository=Allowed&path=removed.md',
+        $cookieJar,
+    );
+    smoke_assert($missingDocument['status'] === 404, 'Missing document must return 404');
+    smoke_assert($missingDocument['payload']['success'] === false, 'Missing document must use error envelope');
+
     $traversal = smoke_request(
         $baseUrl . '?action=directory&repository=Allowed&path=%252e%252e%252fForbidden',
         $cookieJar,

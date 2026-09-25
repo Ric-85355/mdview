@@ -1,16 +1,19 @@
 # MDView Web
 
-This directory contains the first two completed Web MDView stages: the PHP
-foundation and the responsive Repository UI. After authentication, the browser
+This directory contains the first three completed Web MDView stages: the PHP
+foundation, responsive Repository UI, and renderer-independent Reader UI. After authentication, the browser
 can select any server-authorized repository, navigate folders through
 breadcrumbs, search file and folder names, and open Markdown through the
-technical `DocumentView` Reader. Repository location and list scroll are kept
+adaptive `DocumentView` Reader. Repository location and list scroll are kept
 in browser `localStorage` and restored after reload or return from a document.
 
-The final Reader interface, document search/reading-position state, and all
-repository mutations belong to later stages in
-`docs/MD-WEB-implementation-plan.md`. The visible Repository and item menus
-reserve their eventual locations, but their mutation commands are disabled.
+The Reader provides its final toolbar structure, document title, loading/error
+states, bounded desktop reading width, mobile layout, and neutral content
+styles. TOC and document Search controls are present but disabled until stage 4.
+Document search/reading-position state and all repository mutations belong to
+later stages in `docs/MD-WEB-implementation-plan.md`. The visible Repository
+and item menus reserve their eventual locations, but their mutation commands
+are disabled.
 
 ## Layout
 
@@ -20,13 +23,14 @@ web/
 ├── mdview-server/
 │   ├── api.php                   # internal JSON API
 │   ├── bootstrap.php             # configuration and service graph
-│   ├── assets/                   # responsive CSS, UI, and Repository state module
+│   ├── assets/                   # responsive UI plus Repository/Reader state modules
 │   ├── config/                   # ignored local config + safe examples
 │   ├── src/                      # Auth, Repository, Reader, Renderer, API
 │   └── third-party/parsedown/    # pinned Parsedown 1.8.0 (MIT)
 └── tests/
     ├── run.php                   # dependency-free backend tests
     ├── http_smoke.php            # real HTTP/session/API smoke test
+    ├── reader_state_test.js       # Reader mode and DocumentView state tests
     └── repository_state_test.js  # browser-independent client-state tests
 ```
 
@@ -96,7 +100,9 @@ Requirements: PHP 8.1+ with DOM, mbstring, JSON, session, and fileinfo. Run:
 php web/tests/run.php
 php web/tests/http_smoke.php
 node web/tests/repository_state_test.js
+node web/tests/reader_state_test.js
 node --check web/mdview-server/assets/repository-state.js
+node --check web/mdview-server/assets/reader-state.js
 node --check web/mdview-server/assets/app.js
 find web -name '*.php' -print0 | xargs -0 -n1 php -l
 ```

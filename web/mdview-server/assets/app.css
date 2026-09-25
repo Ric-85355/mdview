@@ -1,8 +1,8 @@
 /*
- * app.css — created 2026-09-25, version 0.2.0.
- * Purpose: provide the responsive stage-two Repository UI and readable technical Reader.
- * Algorithm: use a compact application shell, touch-sized list rows, CSS file indicators,
- * and mobile grid reflow without horizontal page scrolling.
+ * app.css — created 2026-09-25, version 0.3.0.
+ * Purpose: provide responsive Repository and stage-three renderer-independent Reader UIs.
+ * Algorithm: use touch-sized controls, a bounded reading column, neutral document styles,
+ * and local overflow for code/tables so neither mobile nor desktop pages scroll sideways.
  */
 
 :root {
@@ -172,13 +172,136 @@ form, label { display: grid; gap: .5rem; }
 .status.error { color: var(--danger); }
 .status.notice { color: var(--muted); }
 
-.reader-panel { max-width: 60rem; margin: 0 auto; }
-.reader-toolbar { position: sticky; top: 0; padding: .4rem 0; background: var(--surface); }
-#toc { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; margin-bottom: 1rem; }
-#toc a { margin-left: calc((var(--level) - 1) * 1rem); }
-#document-content { line-height: 1.6; overflow-wrap: anywhere; }
-#document-content pre { overflow: auto; padding: .75rem; background: var(--surface-raised); }
-#document-content img { max-width: 100%; }
+.reader-panel { width: 100%; min-width: 0; }
+.reader-toolbar {
+    position: sticky;
+    z-index: 4;
+    top: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    align-items: center;
+    gap: .5rem;
+    min-height: 3.6rem;
+    padding: .4rem 0;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(.5rem);
+}
+.reader-toolbar-start { justify-self: start; }
+.reader-toolbar-center { justify-self: center; }
+.reader-toolbar-end { justify-self: end; }
+.reader-toolbar button { min-width: 7rem; background: var(--surface); }
+.reader-toolbar button:disabled { opacity: .5; }
+.reader-message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .75rem;
+    min-height: 45vh;
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--muted);
+}
+.reader-error { color: var(--danger); }
+.loading-indicator {
+    width: 1.8rem;
+    height: 1.8rem;
+    border: .18rem solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: reader-loading .8s linear infinite;
+}
+@keyframes reader-loading { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .loading-indicator { animation: none; } }
+
+.reader-document {
+    width: min(52rem, 100%);
+    margin: 0 auto;
+    padding: clamp(1.2rem, 3vw, 2.5rem) clamp(.15rem, 2vw, 1.25rem) 4rem;
+}
+.document-header {
+    padding-bottom: 1rem;
+    margin-bottom: 1.7rem;
+    border-bottom: 1px solid var(--border);
+}
+.document-header h1 {
+    margin: 0;
+    font-size: clamp(1.65rem, 4vw, 2.35rem);
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+.document-content {
+    min-width: 0;
+    font-size: 1rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+.document-content > :first-child { margin-top: 0; }
+.document-content > :last-child { margin-bottom: 0; }
+.document-content h1,
+.document-content h2,
+.document-content h3,
+.document-content h4,
+.document-content h5,
+.document-content h6 {
+    margin: 1.8em 0 .65em;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.document-content h1 { font-size: clamp(1.55rem, 4vw, 2rem); }
+.document-content h2 { font-size: clamp(1.35rem, 3.5vw, 1.7rem); }
+.document-content h3 { font-size: clamp(1.15rem, 3vw, 1.4rem); }
+.document-content p { margin: 0 0 1em; }
+.document-content ul,
+.document-content ol { margin: .6em 0 1.1em; padding-left: 1.7em; }
+.document-content li { margin: .25em 0; }
+.document-content li > ul,
+.document-content li > ol { margin: .25em 0; }
+.document-content strong { font-weight: 700; }
+.document-content em { font-style: italic; }
+.document-content code {
+    padding: .12em .3em;
+    border-radius: .25rem;
+    background: var(--surface-raised);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: .9em;
+}
+.document-content pre {
+    max-width: 100%;
+    margin: 1.2em 0;
+    padding: 1rem;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: .45rem;
+    background: var(--surface-raised);
+    line-height: 1.5;
+    white-space: pre;
+    overflow-wrap: normal;
+}
+.document-content pre code { padding: 0; background: transparent; font-size: .9rem; }
+.document-content blockquote {
+    margin: 1.2em 0;
+    padding: .2em 0 .2em 1rem;
+    border-left: .25rem solid var(--border);
+    color: var(--muted);
+}
+.document-content blockquote > :last-child { margin-bottom: 0; }
+.document-content a { color: var(--accent); text-decoration-thickness: .08em; text-underline-offset: .16em; }
+.document-content a:hover { text-decoration-thickness: .14em; }
+.document-content hr { margin: 2rem 0; border: 0; border-top: 1px solid var(--border); }
+.document-content table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    margin: 1.3em 0;
+    overflow-x: auto;
+    border-collapse: collapse;
+}
+.document-content th,
+.document-content td { padding: .5rem .65rem; border: 1px solid var(--border); text-align: left; }
+.document-content th { background: var(--surface-raised); }
+.document-content img { display: block; max-width: 100%; height: auto; margin: 1.2em auto; }
 
 @media (max-width: 680px) {
     .app-header { padding-inline: .75rem; }
@@ -192,4 +315,8 @@ form, label { display: grid; gap: .5rem; }
     .repository-picker { min-width: 0; }
     .entry-open { min-height: 3.5rem; }
     .entry-name { white-space: normal; overflow-wrap: anywhere; }
+    .reader-toolbar { gap: .3rem; }
+    .reader-toolbar button { min-width: 0; width: 100%; padding-inline: .45rem; }
+    .reader-document { padding-top: 1.25rem; }
+    .document-content { line-height: 1.6; }
 }

@@ -192,7 +192,7 @@ placeholder-файлов.
 copy/move, recursive delete, multi-select, SFTP key auth и ручной fingerprint
 verification. Share поддерживает только один файл; `ACTION_SEND_MULTIPLE` и batch upload нет.
 
-## Web-версия: этапы 1–2
+## Web-версия: этапы 1–3
 
 В `web/` создан минимальный фундамент MDView Web для PHP 8.1+ и обычного shared hosting.
 Deployment layout совпадает с архитектурой: `mdview.php` размещается в `repository-root`,
@@ -207,7 +207,7 @@ Deployment layout совпадает с архитектурой: `mdview.php` �
 - `src/Reader/` — открытие логического пути через renderer registry и контракт `DocumentView`;
 - `src/Renderer/` — общий renderer interface/registry и Markdown renderer;
 - `config/*.example.php` — безопасные шаблоны; реальные `app.php`/`users.php` игнорируются Git;
-- `assets/` и `mdview.php` — адаптивный HTML/CSS/vanilla-JS Repository UI и пока технический Reader.
+- `assets/` и `mdview.php` — адаптивные HTML/CSS/vanilla-JS Repository и Reader UI.
 
 `repository-root` задаётся явно в ignored `config/app.php` или `MDVIEW_REPOSITORY_ROOT`.
 `PathGuard` повторно URL-decode'ит вход, отклоняет absolute paths, `..`, separators/
@@ -239,9 +239,23 @@ scrollTop списка. При reload недоступный repository заме
 позицию прокрутки. Чистая state/path logic вынесена в `repository-state.js` и проверяется
 Node-тестом. ACL в JavaScript не дублируется: список и доступ по-прежнему определяет backend.
 
-Следующий этап по `docs/MD-WEB-implementation-plan.md` — окончательный адаптивный Reader UI
-на контракте `DocumentView`. TOC drawer, поиск внутри документа и позиция чтения относятся
-к этапу 4; Upload/New folder/Rename/Move/Delete и активные контекстные меню — к этапу 5.
+Этап 3 добавил renderer-independent Reader UI, использующий только `DocumentView.title` и
+`DocumentView.content`. Постоянная верхняя панель имеет финальную трёхчастную структуру
+`Contents | Search | Repository`; первые две кнопки видимы, но disabled до этапа 4, а Repository
+возвращает прежний список, каталог и scroll position. При начале загрузки старый документ
+очищается и показывается отдельное состояние Opening; 400/403/404/render/server errors
+показываются внутри Reader с рабочим возвратом, а 401 переводит к login как потеря сессии.
+
+Reader ограничивает ширину текста на desktop и использует доступную ширину на mobile. Нейтральные
+стили покрывают headings, paragraphs, nested lists, strong/emphasis, inline/pre code, blockquotes,
+links, rules, tables и images. Длинный code и широкие tables прокручиваются внутри своих блоков,
+не создавая горизонтальный scroll страницы. Абсолютные HTTP(S)-ссылки открываются в новой вкладке
+с `noopener noreferrer`, внутренние anchors не изменяются. Чистые переходы loading/ready/error/back
+вынесены в `reader-state.js` и проверяются без браузера; тип/renderer документа frontend не проверяет.
+
+Следующий этап по `docs/MD-WEB-implementation-plan.md` — TOC drawer, уровни и переходы,
+поиск внутри документа и `localStorage` позиции чтения. Upload/New folder/Rename/Move/Delete
+и активные контекстные меню остаются для этапа 5.
 
 ## Текущий статус
 

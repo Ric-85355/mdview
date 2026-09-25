@@ -1,14 +1,15 @@
 /*
- * app.js — created 2026-09-25, version 0.2.0.
- * Purpose: provide the stage-two Auth, Repository, search, and technical Reader UI.
- * Algorithm: use the JSON API as the data/ACL source, render safe DOM nodes, persist
- * repository location and list scroll, and recover unavailable saved paths by ancestors.
+ * app.js — created 2026-09-25, version 0.3.0.
+ * Purpose: provide Auth, Repository, search, and the stage-three DocumentView Reader UI.
+ * Algorithm: use JSON API data, render explicit Repository/Reader states, preserve
+ * Repository location and scroll, and insert only renderer-produced safe HTML.
  */
 
 'use strict';
 
 const apiUrl = 'mdview-server/api.php';
 const stateTools = window.MdviewRepositoryState;
+const readerTools = window.MdviewReaderState;
 let csrfToken = '';
 let repositories = [];
 let currentRepository = '';
@@ -17,6 +18,8 @@ let currentScrollTop = 0;
 let returnScrollTop = 0;
 let searchActive = false;
 let requestSequence = 0;
+let readerRequestSequence = 0;
+let readerState = readerTools.repository();
 
 const loginPanel = document.querySelector('#login-panel');
 const repositoryPanel = document.querySelector('#repository-panel');
@@ -28,6 +31,12 @@ const listRegion = document.querySelector('#entry-list-region');
 const searchForm = document.querySelector('#repository-search');
 const searchInput = document.querySelector('#search-query');
 const clearSearchButton = document.querySelector('#clear-search');
+const readerLoading = document.querySelector('#reader-loading');
+const readerError = document.querySelector('#reader-error');
+const readerErrorMessage = document.querySelector('#reader-error-message');
+const readerDocument = document.querySelector('#reader-document');
+const documentTitle = document.querySelector('#document-title');
+const documentContent = document.querySelector('#document-content');
 const statusNode = document.querySelector('#status');
 
 class ApiError extends Error {
@@ -94,6 +103,8 @@ function finishLoading() {
 
 function showLogin(message = '') {
     requestSequence++;
+    readerRequestSequence++;
+    readerState = readerTools.repository();
     repositories = [];
     repositoryPanel.hidden = true;
     readerPanel.hidden = true;
@@ -101,6 +112,47 @@ function showLogin(message = '') {
     document.querySelector('#identity').textContent = '';
     document.querySelector('#logout').hidden = true;
     setStatus(message);
+}
+
+function prepareDocumentLinks() {
+    for (const link of documentContent.querySelectorAll('a[href]')) {
+        const href = link.getAttribute('href') || '';
+        if (readerTools.isExternalHttpLink(href)) {
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+        }
+    }
+}
+
+function renderReader(nextState) {
+    readerState = nextState;
+    const inReader = readerState.mode === 'reader';
+    repositoryPanel.hidden = inReader;
+    readerPanel.hidden = !inReader;
+
+    readerLoading.hidden = readerState.status !== 'loading';
+    readerError.hidden = readerState.status !== 'error';
+    readerDocument.hidden = readerState.status !== 'ready';
+
+    if (readerState.status === 'loading') {
+        documentTitle.textContent = '';
+        documentContent.replaceChildren();
+        readerErrorMessage.textContent = '';
+        document.title = 'Opening document… — MDView';
+    } else if (readerState.status === 'error') {
+        documentTitle.textContent = '';
+        documentContent.replaceChildren();
+        readerErrorMessage.textContent = readerState.error;
+        document.title = 'Document error — MDView';
+    } else if (readerState.status === 'ready') {
+        documentTitle.textContent = readerState.document.title;
+        // DocumentView.content is sanitized by the selected backend renderer.
+        documentContent.innerHTML = readerState.document.content;
+        prepareDocumentLinks();
+        document.title = `${readerState.document.title} — MDView`;
+    } else {
+        document.title = 'MDView Web';
+    }
 }
 
 function persistRepositoryState() {
@@ -278,8 +330,7 @@ async function restoreDirectory(savedState) {
 
 async function showRepositories(user) {
     loginPanel.hidden = true;
-    readerPanel.hidden = true;
-    repositoryPanel.hidden = false;
+    renderReader(readerTools.repository());
     document.querySelector('#identity').textContent = `${user.username} (${user.role})`;
     document.querySelector('#logout').hidden = false;
     setLoading('Loading repositories…');
@@ -339,29 +390,32 @@ async function searchRepository(query) {
 }
 
 async function openDocument(repository, path) {
+    const readerRequestId = ++readerRequestSequence;
     returnScrollTop = listRegion.scrollTop;
     if (!searchActive) {
         currentScrollTop = returnScrollTop;
         persistRepositoryState();
     }
-    setStatus('Opening document…');
-    const {document: view} = await api('document', {query: {repository, path}});
-    repositoryPanel.hidden = true;
-    readerPanel.hidden = false;
-    document.querySelector('#document-title').textContent = view.title;
-    const toc = document.querySelector('#toc');
-    toc.replaceChildren();
-    for (const heading of view.toc) {
-        const link = document.createElement('a');
-        link.href = `#${encodeURIComponent(heading.target)}`;
-        link.textContent = heading.title;
-        link.style.setProperty('--level', heading.level);
-        toc.append(link);
-    }
-    // Content is produced by Parsedown safe mode and annotated server-side.
-    document.querySelector('#document-content').innerHTML = view.content;
-    window.scrollTo({top: 0});
     setStatus('');
+    renderReader(readerTools.loading());
+    window.scrollTo({top: 0});
+    try {
+        const {document: view} = await api('document', {query: {repository, path}});
+        if (readerRequestId !== readerRequestSequence) {
+            return;
+        }
+        renderReader(readerTools.ready(view));
+    } catch (failure) {
+        if (readerRequestId !== readerRequestSequence) {
+            return;
+        }
+        if (failure instanceof ApiError && failure.status === 401) {
+            showError(failure);
+            return;
+        }
+        const message = failure instanceof Error ? failure.message : 'The document could not be loaded.';
+        renderReader(readerTools.failed(message));
+    }
 }
 
 async function initialize() {
@@ -440,8 +494,8 @@ listRegion.addEventListener('scroll', () => {
 }, {passive: true});
 
 document.querySelector('#back').addEventListener('click', () => {
-    readerPanel.hidden = true;
-    repositoryPanel.hidden = false;
+    readerRequestSequence++;
+    renderReader(readerTools.repository());
     requestAnimationFrame(() => {
         listRegion.scrollTop = returnScrollTop;
     });

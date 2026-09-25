@@ -1,9 +1,9 @@
 <?php
 /*
- * mdview.php — created 2026-09-25, version 0.2.0.
- * Purpose: provide the Web MDView entry point and stage-two Repository interface.
+ * mdview.php — created 2026-09-25, version 0.3.0.
+ * Purpose: provide the Web MDView entry point and stage-three Repository/Reader interface.
  * Algorithm: serve an accessible application shell whose vanilla-JS client authenticates,
- * navigates repositories, searches names, and opens the existing technical Reader.
+ * navigates repositories and displays renderer-independent DocumentView responses.
  */
 
 declare(strict_types=1);
@@ -60,18 +60,36 @@ declare(strict_types=1);
         </div>
     </section>
 
-    <section id="reader-panel" class="reader-panel" hidden>
-        <div class="reader-toolbar">
-            <button id="back" type="button">&#8592; Repository</button>
+    <section id="reader-panel" class="reader-panel" hidden aria-label="Document reader">
+        <div class="reader-toolbar" aria-label="Reader controls">
+            <button id="reader-toc" class="reader-toolbar-start" type="button" disabled title="Available in the next stage">
+                Contents
+            </button>
+            <button id="reader-search" class="reader-toolbar-center" type="button" disabled title="Available in the next stage">
+                Search
+            </button>
+            <button id="back" class="reader-toolbar-end" type="button">Repository</button>
         </div>
-        <h1 id="document-title"></h1>
-        <nav id="toc" aria-label="Table of contents"></nav>
-        <article id="document-content"></article>
+        <div id="reader-loading" class="reader-message" role="status" hidden>
+            <span class="loading-indicator" aria-hidden="true"></span>
+            <span>Opening document…</span>
+        </div>
+        <div id="reader-error" class="reader-message reader-error" role="alert" hidden>
+            <strong>Could not open document</strong>
+            <span id="reader-error-message"></span>
+        </div>
+        <div id="reader-document" class="reader-document" hidden>
+            <header class="document-header">
+                <h1 id="document-title"></h1>
+            </header>
+            <article id="document-content" class="document-content"></article>
+        </div>
     </section>
 
     <p id="status" role="status" aria-live="polite"></p>
 </main>
 <script src="mdview-server/assets/repository-state.js"></script>
+<script src="mdview-server/assets/reader-state.js"></script>
 <script src="mdview-server/assets/app.js"></script>
 </body>
 </html>
