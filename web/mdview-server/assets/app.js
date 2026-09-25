@@ -1,55 +1,279 @@
 /*
- * app.js — created 2026-09-25, version 0.1.0.
- * Purpose: exercise Auth, Repository, and Reader JSON APIs from a minimal vanilla-JS frontend.
- * Algorithm: retain only in-memory navigation, render text with DOM APIs, and insert only server-sanitized HTML.
+ * app.js — created 2026-09-25, version 0.2.0.
+ * Purpose: provide the stage-two Auth, Repository, search, and technical Reader UI.
+ * Algorithm: use the JSON API as the data/ACL source, render safe DOM nodes, persist
+ * repository location and list scroll, and recover unavailable saved paths by ancestors.
  */
 
 'use strict';
 
 const apiUrl = 'mdview-server/api.php';
+const stateTools = window.MdviewRepositoryState;
 let csrfToken = '';
+let repositories = [];
 let currentRepository = '';
 let currentPath = '';
+let currentScrollTop = 0;
+let returnScrollTop = 0;
+let searchActive = false;
+let requestSequence = 0;
 
 const loginPanel = document.querySelector('#login-panel');
 const repositoryPanel = document.querySelector('#repository-panel');
 const readerPanel = document.querySelector('#reader-panel');
+const repositorySelect = document.querySelector('#repository-select');
+const entriesNode = document.querySelector('#entries');
+const emptyState = document.querySelector('#empty-state');
+const listRegion = document.querySelector('#entry-list-region');
+const searchForm = document.querySelector('#repository-search');
+const searchInput = document.querySelector('#search-query');
+const clearSearchButton = document.querySelector('#clear-search');
 const statusNode = document.querySelector('#status');
+
+class ApiError extends Error {
+    constructor(message, status, code) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.code = code;
+    }
+}
 
 async function api(action, options = {}) {
     const query = new URLSearchParams({action, ...(options.query || {})});
-    const response = await fetch(`${apiUrl}?${query}`, {
-        method: options.method || 'GET',
-        credentials: 'same-origin',
-        headers: options.body ? {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken} : {},
-        body: options.body ? JSON.stringify(options.body) : undefined,
-    });
-    const payload = await response.json();
+    let response;
+    try {
+        response = await fetch(`${apiUrl}?${query}`, {
+            method: options.method || 'GET',
+            credentials: 'same-origin',
+            headers: options.body ? {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken} : {},
+            body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+    } catch (failure) {
+        throw new ApiError('Could not reach the server', 0, 'network_error');
+    }
+
+    let payload;
+    try {
+        payload = await response.json();
+    } catch (_) {
+        throw new ApiError('The server returned an invalid response', response.status, 'invalid_response');
+    }
     if (!response.ok || !payload.success) {
-        throw new Error(payload.error?.message || `HTTP ${response.status}`);
+        throw new ApiError(
+            payload.error?.message || `HTTP ${response.status}`,
+            response.status,
+            payload.error?.code || 'request_failed',
+        );
     }
     return payload.data;
 }
 
 function showError(failure) {
-    statusNode.textContent = failure instanceof Error ? failure.message : String(failure);
-    statusNode.className = 'error';
-}
-
-function clearStatus() {
-    statusNode.textContent = '';
-    statusNode.className = '';
-}
-
-async function initialize() {
-    csrfToken = (await api('csrf')).csrf_token;
-    try {
-        const session = await api('session');
-        csrfToken = session.csrf_token;
-        await showRepositories(session.user);
-    } catch (_) {
-        loginPanel.hidden = false;
+    if (failure instanceof ApiError && failure.status === 401) {
+        showLogin('Your session has expired. Sign in again.');
+        return;
     }
+    statusNode.textContent = failure instanceof Error ? failure.message : String(failure);
+    statusNode.className = 'status error';
+}
+
+function setStatus(message = '') {
+    statusNode.textContent = message;
+    statusNode.className = message === '' ? 'status' : 'status notice';
+}
+
+function setLoading(message) {
+    setStatus(message);
+    repositoryPanel.setAttribute('aria-busy', 'true');
+}
+
+function finishLoading() {
+    repositoryPanel.removeAttribute('aria-busy');
+}
+
+function showLogin(message = '') {
+    requestSequence++;
+    repositories = [];
+    repositoryPanel.hidden = true;
+    readerPanel.hidden = true;
+    loginPanel.hidden = false;
+    document.querySelector('#identity').textContent = '';
+    document.querySelector('#logout').hidden = true;
+    setStatus(message);
+}
+
+function persistRepositoryState() {
+    if (currentRepository === '') {
+        return;
+    }
+    stateTools.save(localStorage, {
+        repository: currentRepository,
+        path: currentPath,
+        scrollTop: currentScrollTop,
+    });
+}
+
+function renderRepositoryChoices() {
+    repositorySelect.replaceChildren();
+    for (const repository of repositories) {
+        const option = document.createElement('option');
+        option.value = repository.id;
+        option.textContent = repository.name;
+        repositorySelect.append(option);
+    }
+    repositorySelect.value = currentRepository;
+}
+
+function renderBreadcrumbs() {
+    const breadcrumbs = document.querySelector('#breadcrumbs');
+    breadcrumbs.replaceChildren();
+    const currentName = repositories.find(repository => repository.id === currentRepository)?.name || currentRepository;
+    for (const [index, item] of stateTools.breadcrumbs(currentPath).entries()) {
+        if (index > 0) {
+            const separator = document.createElement('span');
+            separator.className = 'breadcrumb-separator';
+            separator.textContent = '/';
+            separator.setAttribute('aria-hidden', 'true');
+            breadcrumbs.append(separator);
+        }
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = item.path === '' ? currentName : item.label;
+        button.setAttribute('aria-label', item.path === '' ? 'Repository root' : `Open ${item.label}`);
+        if (item.path === currentPath) {
+            button.disabled = true;
+            button.setAttribute('aria-current', 'page');
+        } else {
+            button.addEventListener('click', () => openDirectory(currentRepository, item.path).catch(showError));
+        }
+        breadcrumbs.append(button);
+    }
+}
+
+function entryIcon(type) {
+    const icon = document.createElement('span');
+    icon.className = `entry-icon entry-icon-${type}`;
+    icon.setAttribute('aria-hidden', 'true');
+    return icon;
+}
+
+function createItemMenu(entry) {
+    const details = document.createElement('details');
+    details.className = 'menu item-menu';
+    const summary = document.createElement('summary');
+    summary.textContent = '\u22ee';
+    summary.setAttribute('aria-label', `Actions for ${entry.name}`);
+    const popover = document.createElement('div');
+    popover.className = 'menu-popover';
+    popover.setAttribute('role', 'menu');
+    for (const label of ['Rename', 'Move', 'Delete']) {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.disabled = true;
+        action.textContent = label;
+        action.setAttribute('role', 'menuitem');
+        popover.append(action);
+    }
+    details.append(summary, popover);
+    return details;
+}
+
+function renderEntries(entries, options = {}) {
+    entriesNode.replaceChildren();
+    emptyState.hidden = entries.length !== 0;
+    emptyState.textContent = options.emptyMessage || 'This folder is empty';
+    for (const entry of entries) {
+        const item = document.createElement('li');
+        item.className = 'entry-row';
+
+        const openButton = document.createElement('button');
+        openButton.type = 'button';
+        openButton.className = 'entry-open';
+        openButton.append(entryIcon(entry.type));
+        const text = document.createElement('span');
+        text.className = 'entry-text';
+        const name = document.createElement('span');
+        name.className = 'entry-name';
+        name.textContent = entry.name;
+        text.append(name);
+        if (options.showPath) {
+            const path = document.createElement('span');
+            path.className = 'entry-path';
+            path.textContent = entry.path;
+            text.append(path);
+        }
+        openButton.append(text);
+
+        if (entry.type === 'directory') {
+            openButton.addEventListener('click', () => openDirectory(currentRepository, entry.path).catch(showError));
+        } else if (entry.readable) {
+            openButton.addEventListener('click', () => openDocument(currentRepository, entry.path).catch(showError));
+        } else {
+            openButton.disabled = true;
+            openButton.title = 'This file type is not supported';
+        }
+        item.append(openButton, createItemMenu(entry));
+        entriesNode.append(item);
+    }
+}
+
+async function requestDirectory(repository, path) {
+    return api('directory', {query: {repository, path}});
+}
+
+async function openDirectory(repository, path, options = {}) {
+    const requestId = ++requestSequence;
+    setLoading('Loading folder…');
+    try {
+        const data = await requestDirectory(repository, path);
+        if (requestId !== requestSequence) {
+            return;
+        }
+        currentRepository = repository;
+        currentPath = data.path;
+        currentScrollTop = options.restoreScroll || 0;
+        returnScrollTop = currentScrollTop;
+        searchActive = false;
+        searchInput.value = '';
+        clearSearchButton.hidden = true;
+        repositorySelect.value = repository;
+        document.querySelector('#repository-heading').textContent = 'Folder contents';
+        renderBreadcrumbs();
+        renderEntries(data.entries);
+        requestAnimationFrame(() => {
+            listRegion.scrollTop = returnScrollTop;
+        });
+        persistRepositoryState();
+        setStatus('');
+    } finally {
+        if (requestId === requestSequence) {
+            finishLoading();
+        }
+    }
+}
+
+async function restoreDirectory(savedState) {
+    const repository = stateTools.selectRepository(
+        repositories.map(available => available.id),
+        savedState?.repository,
+    );
+    const paths = stateTools.pathFallbacks(savedState?.repository === repository ? savedState.path : '');
+    for (const path of paths) {
+        try {
+            await openDirectory(repository, path, {
+                restoreScroll: path === savedState?.path ? savedState.scrollTop : 0,
+            });
+            return;
+        } catch (failure) {
+            const recoverable = failure instanceof ApiError
+                && (failure.status === 404 || failure.code === 'not_a_directory');
+            if (!recoverable) {
+                throw failure;
+            }
+        }
+    }
+    await openDirectory(repository, '');
 }
 
 async function showRepositories(user) {
@@ -58,46 +282,69 @@ async function showRepositories(user) {
     repositoryPanel.hidden = false;
     document.querySelector('#identity').textContent = `${user.username} (${user.role})`;
     document.querySelector('#logout').hidden = false;
-    const data = await api('repositories');
-    const container = document.querySelector('#repositories');
-    container.replaceChildren();
-    for (const repository of data.repositories) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = repository.name;
-        button.addEventListener('click', () => openDirectory(repository.id, '').catch(showError));
-        container.append(button);
+    setLoading('Loading repositories…');
+    try {
+        const data = await api('repositories');
+        repositories = data.repositories;
+        if (repositories.length === 0) {
+            currentRepository = '';
+            currentPath = '';
+            renderRepositoryChoices();
+            document.querySelector('#breadcrumbs').replaceChildren();
+            renderEntries([], {emptyMessage: 'No repositories are available'});
+            repositorySelect.disabled = true;
+            searchInput.disabled = true;
+            setStatus('No repositories are available for this account.');
+            return;
+        }
+        repositorySelect.disabled = false;
+        searchInput.disabled = false;
+        const savedState = stateTools.load(localStorage);
+        currentRepository = stateTools.selectRepository(
+            repositories.map(repository => repository.id),
+            savedState?.repository,
+        );
+        renderRepositoryChoices();
+        await restoreDirectory(savedState);
+    } finally {
+        finishLoading();
     }
 }
 
-async function openDirectory(repository, path) {
-    clearStatus();
-    const data = await api('directory', {query: {repository, path}});
-    currentRepository = repository;
-    currentPath = data.path;
-    document.querySelector('#current-path').textContent = `${repository}/${data.path}`;
-    document.querySelector('#up').hidden = data.path === '';
-    const list = document.querySelector('#entries');
-    list.replaceChildren();
-    for (const entry of data.entries) {
-        const item = document.createElement('li');
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = `${entry.type === 'directory' ? '[DIR]' : '[FILE]'} ${entry.name}`;
-        if (entry.type === 'directory') {
-            button.addEventListener('click', () => openDirectory(repository, entry.path).catch(showError));
-        } else if (entry.readable) {
-            button.addEventListener('click', () => openDocument(repository, entry.path).catch(showError));
-        } else {
-            button.disabled = true;
+async function searchRepository(query) {
+    const normalized = query.trim();
+    if (normalized === '') {
+        await openDirectory(currentRepository, currentPath, {restoreScroll: currentScrollTop});
+        return;
+    }
+    const requestId = ++requestSequence;
+    setLoading('Searching…');
+    try {
+        const data = await api('search', {query: {repository: currentRepository, query: normalized}});
+        if (requestId !== requestSequence) {
+            return;
         }
-        item.append(button);
-        list.append(item);
+        searchActive = true;
+        clearSearchButton.hidden = false;
+        document.querySelector('#repository-heading').textContent = `Search results for “${normalized}”`;
+        renderEntries(data.results, {showPath: true, emptyMessage: 'No matching files or folders'});
+        listRegion.scrollTop = 0;
+        returnScrollTop = 0;
+        setStatus('');
+    } finally {
+        if (requestId === requestSequence) {
+            finishLoading();
+        }
     }
 }
 
 async function openDocument(repository, path) {
-    clearStatus();
+    returnScrollTop = listRegion.scrollTop;
+    if (!searchActive) {
+        currentScrollTop = returnScrollTop;
+        persistRepositoryState();
+    }
+    setStatus('Opening document…');
     const {document: view} = await api('document', {query: {repository, path}});
     repositoryPanel.hidden = true;
     readerPanel.hidden = false;
@@ -111,13 +358,30 @@ async function openDocument(repository, path) {
         link.style.setProperty('--level', heading.level);
         toc.append(link);
     }
-    // content is produced by Parsedown safe mode and annotated server-side.
+    // Content is produced by Parsedown safe mode and annotated server-side.
     document.querySelector('#document-content').innerHTML = view.content;
+    window.scrollTo({top: 0});
+    setStatus('');
+}
+
+async function initialize() {
+    csrfToken = (await api('csrf')).csrf_token;
+    try {
+        const session = await api('session');
+        csrfToken = session.csrf_token;
+        await showRepositories(session.user);
+    } catch (failure) {
+        if (failure instanceof ApiError && failure.status === 401) {
+            showLogin();
+            return;
+        }
+        throw failure;
+    }
 }
 
 document.querySelector('#login-form').addEventListener('submit', async event => {
     event.preventDefault();
-    clearStatus();
+    setStatus('Signing in…');
     const values = new FormData(event.currentTarget);
     try {
         const data = await api('login', {
@@ -136,23 +400,51 @@ document.querySelector('#logout').addEventListener('click', async () => {
     try {
         const data = await api('logout', {method: 'POST', body: {}});
         csrfToken = data.csrf_token;
-        repositoryPanel.hidden = true;
-        readerPanel.hidden = true;
-        loginPanel.hidden = false;
-        document.querySelector('#identity').textContent = '';
-        document.querySelector('#logout').hidden = true;
+        showLogin();
     } catch (failure) {
         showError(failure);
     }
 });
 
-document.querySelector('#up').addEventListener('click', () => {
-    const parent = currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '';
-    openDirectory(currentRepository, parent).catch(showError);
+repositorySelect.addEventListener('change', () => {
+    openDirectory(repositorySelect.value, '').catch(failure => {
+        repositorySelect.value = currentRepository;
+        showError(failure);
+    });
 });
+
+searchForm.addEventListener('submit', event => {
+    event.preventDefault();
+    searchRepository(searchInput.value).catch(showError);
+});
+
+clearSearchButton.addEventListener('click', () => {
+    searchInput.value = '';
+    openDirectory(currentRepository, currentPath, {restoreScroll: currentScrollTop}).catch(showError);
+    searchInput.focus();
+});
+
+searchInput.addEventListener('input', () => {
+    if (searchInput.value === '' && searchActive) {
+        openDirectory(currentRepository, currentPath, {restoreScroll: currentScrollTop}).catch(showError);
+    }
+});
+
+listRegion.addEventListener('scroll', () => {
+    returnScrollTop = listRegion.scrollTop;
+    if (searchActive) {
+        return;
+    }
+    currentScrollTop = returnScrollTop;
+    persistRepositoryState();
+}, {passive: true});
+
 document.querySelector('#back').addEventListener('click', () => {
     readerPanel.hidden = true;
     repositoryPanel.hidden = false;
+    requestAnimationFrame(() => {
+        listRegion.scrollTop = returnScrollTop;
+    });
 });
 
 initialize().catch(showError);

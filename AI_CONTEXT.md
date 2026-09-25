@@ -192,7 +192,7 @@ placeholder-файлов.
 copy/move, recursive delete, multi-select, SFTP key auth и ручной fingerprint
 verification. Share поддерживает только один файл; `ACTION_SEND_MULTIPLE` и batch upload нет.
 
-## Web-версия: этап 1
+## Web-версия: этапы 1–2
 
 В `web/` создан минимальный фундамент MDView Web для PHP 8.1+ и обычного shared hosting.
 Deployment layout совпадает с архитектурой: `mdview.php` размещается в `repository-root`,
@@ -207,8 +207,7 @@ Deployment layout совпадает с архитектурой: `mdview.php` �
 - `src/Reader/` — открытие логического пути через renderer registry и контракт `DocumentView`;
 - `src/Renderer/` — общий renderer interface/registry и Markdown renderer;
 - `config/*.example.php` — безопасные шаблоны; реальные `app.php`/`users.php` игнорируются Git;
-- `assets/` и `mdview.php` — только технический HTML/CSS/vanilla-JS frontend для проверки login,
-  repository navigation и Reader; это не окончательный UI.
+- `assets/` и `mdview.php` — адаптивный HTML/CSS/vanilla-JS Repository UI и пока технический Reader.
 
 `repository-root` задаётся явно в ignored `config/app.php` или `MDVIEW_REPOSITORY_ROOT`.
 `PathGuard` повторно URL-decode'ит вход, отклоняет absolute paths, `..`, separators/
@@ -225,9 +224,24 @@ Markdown обрабатывается pinned `erusev/parsedown` 1.8.0 (MIT), ven
 но `AuthService::requireWrite()`, CSRF и HTTP 409 conflict infrastructure готовы для этапа 5.
 Проверки: `php web/tests/run.php`, `php web/tests/http_smoke.php`, PHP lint всех `.php`.
 
-Следующий этап по `docs/MD-WEB-implementation-plan.md` — полноценный Repository UI:
-выбор репозитория, просмотр/навигация каталогов, name search, открытие документа
-и восстановление Repository state. Reader UI, TOC/search/localStorage и mutations остаются для этапов 3–5.
+Этап 2 добавил полноценный Repository UI: верхнюю панель с разрешённым backend-ом
+выбором репозитория, name-only поиском и заготовкой меню, breadcrumbs логического пути,
+touch-friendly список каталогов/файлов и отдельные `⋮` у строк. Каталог и поддерживаемый
+документ открываются одиночным click/tap; результаты поиска показывают полный относительный
+путь и используют те же переходы. Loading, пустые списки, отсутствие совпадений, потеря
+сессии и безопасные API errors имеют отдельные состояния. Интерфейс адаптируется к mobile
+без обязательной frontend-сборки и без горизонтальной прокрутки страницы.
+
+`mdview.repository.v1` в `localStorage` хранит выбранный repository, текущий каталог и
+scrollTop списка. При reload недоступный repository заменяется первым разрешённым, а
+исчезнувший каталог последовательно откатывается к ближайшему существующему родителю.
+Перед техническим Reader состояние сохраняется, а Back возвращает тот же DOM списка и
+позицию прокрутки. Чистая state/path logic вынесена в `repository-state.js` и проверяется
+Node-тестом. ACL в JavaScript не дублируется: список и доступ по-прежнему определяет backend.
+
+Следующий этап по `docs/MD-WEB-implementation-plan.md` — окончательный адаптивный Reader UI
+на контракте `DocumentView`. TOC drawer, поиск внутри документа и позиция чтения относятся
+к этапу 4; Upload/New folder/Rename/Move/Delete и активные контекстные меню — к этапу 5.
 
 ## Текущий статус
 

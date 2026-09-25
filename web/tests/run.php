@@ -76,6 +76,7 @@ function remove_tree(string $path): void
 $root = $base . '/repository-root';
 $outside = $base . '/outside';
 mkdir($root . '/Alpha/Folder With Space', 0777, true);
+mkdir($root . '/Alpha/Z Empty', 0777, true);
 mkdir($root . '/Русский Репо/Вложенный', 0777, true);
 mkdir($root . '/mdview-server/config', 0777, true);
 mkdir($root . '/Alpha/.git', 0777, true);
@@ -137,6 +138,11 @@ $tests['directory listing supports UTF-8 spaces and directory-first order'] = st
     assert_same('directory', $alpha['entries'][0]['type'], 'Directory type mismatch');
     $utf8 = $repositories->listDirectory('Русский Репо', 'Вложенный');
     assert_same('Документ.md', $utf8['entries'][0]['name'], 'UTF-8 filename mismatch');
+};
+$tests['empty directories remain navigable'] = static function () use ($repositories): void {
+    $empty = $repositories->listDirectory('Alpha', 'Z Empty');
+    assert_same('Z Empty', $empty['path'], 'Directory path mismatch');
+    assert_same([], $empty['entries'], 'Empty directory should return an empty entry list');
 };
 $tests['repository list obeys current user grants'] = static function () use ($repositories): void {
     $visible = $repositories->listRepositories(static fn (string $name): bool => $name === 'Alpha');

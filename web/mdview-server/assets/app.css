@@ -1,24 +1,195 @@
 /*
- * app.css — created 2026-09-25, version 0.1.0.
- * Purpose: keep the stage-one verification UI readable without defining final product visuals.
- * Algorithm: apply a compact responsive column, neutral controls, and safe document wrapping.
+ * app.css — created 2026-09-25, version 0.2.0.
+ * Purpose: provide the responsive stage-two Repository UI and readable technical Reader.
+ * Algorithm: use a compact application shell, touch-sized list rows, CSS file indicators,
+ * and mobile grid reflow without horizontal page scrolling.
  */
 
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-body { margin: 0; }
-header { display: flex; gap: 1rem; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid #8886; }
-header #identity { margin-left: auto; }
-main { width: min(960px, calc(100% - 2rem)); margin: 1rem auto; }
+:root {
+    color-scheme: light dark;
+    font-family: system-ui, sans-serif;
+    --surface: Canvas;
+    --surface-raised: color-mix(in srgb, Canvas 94%, CanvasText 6%);
+    --border: color-mix(in srgb, CanvasText 22%, transparent);
+    --muted: color-mix(in srgb, CanvasText 65%, transparent);
+    --accent: #3569c8;
+    --danger: #c62828;
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body { margin: 0; overflow-x: hidden; background: var(--surface); color: CanvasText; }
+button, input, select { font: inherit; }
+button, select, summary { min-height: 2.75rem; }
+button, select, input { border: 1px solid var(--border); border-radius: .45rem; padding: .5rem .7rem; }
+button, select, summary { cursor: pointer; }
+button:disabled, select:disabled { cursor: default; opacity: .55; }
+[hidden] { display: none !important; }
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.app-header {
+    display: flex;
+    gap: .75rem;
+    align-items: center;
+    min-height: 3.25rem;
+    padding: .45rem max(1rem, calc((100vw - 1120px) / 2));
+    border-bottom: 1px solid var(--border);
+}
+
+.app-header #identity { margin-left: auto; color: var(--muted); overflow-wrap: anywhere; }
+.quiet-button { background: transparent; }
+main { width: min(1120px, 100%); margin: 0 auto; padding: 1rem; }
+.login-panel { max-width: 26rem; margin: 3rem auto; }
 form, label { display: grid; gap: .5rem; }
-form { max-width: 24rem; }
-button, input { font: inherit; padding: .45rem .65rem; }
-#repositories { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
-.path-row { display: flex; align-items: center; gap: .75rem; }
-#entries { padding: 0; list-style: none; }
-#entries button { width: 100%; text-align: left; border: 0; border-bottom: 1px solid #8884; background: transparent; }
+.login-panel form { gap: 1rem; }
+
+.repository-panel {
+    display: grid;
+    grid-template-rows: auto auto auto minmax(16rem, calc(100vh - 15rem));
+    min-height: calc(100vh - 5.25rem);
+}
+
+.repository-toolbar {
+    display: grid;
+    grid-template-columns: minmax(10rem, 1fr) minmax(16rem, 2fr) auto;
+    gap: .75rem;
+    align-items: center;
+    padding-bottom: .8rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.repository-picker select { width: 100%; font-weight: 650; }
+.repository-search { display: flex; gap: .4rem; min-width: 0; }
+.repository-search input { min-width: 0; width: 100%; }
+
+.menu { position: relative; }
+.menu > summary {
+    display: grid;
+    place-items: center;
+    min-width: 2.75rem;
+    border: 1px solid var(--border);
+    border-radius: .45rem;
+    font-size: 1.45rem;
+    line-height: 1;
+    list-style: none;
+    user-select: none;
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu-popover {
+    position: absolute;
+    z-index: 5;
+    top: calc(100% + .25rem);
+    right: 0;
+    display: grid;
+    min-width: 10rem;
+    padding: .3rem;
+    border: 1px solid var(--border);
+    border-radius: .5rem;
+    background: var(--surface-raised);
+    box-shadow: 0 .5rem 1.4rem #0003;
+}
+.menu-popover button { text-align: left; border: 0; background: transparent; }
+
+.breadcrumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .25rem;
+    min-width: 0;
+    padding: .75rem 0 .5rem;
+}
+.breadcrumbs button {
+    min-width: 0;
+    min-height: 2.25rem;
+    padding: .25rem .45rem;
+    overflow-wrap: anywhere;
+    border: 0;
+    background: transparent;
+}
+.breadcrumbs button:not(:disabled) { color: var(--accent); text-decoration: underline; }
+.breadcrumbs button:disabled { opacity: 1; color: CanvasText; font-weight: 650; }
+.breadcrumb-separator { color: var(--muted); }
+.list-heading { padding: .2rem 0 .65rem; color: var(--muted); font-size: .9rem; }
+.entry-list-region { overflow-y: auto; border: 1px solid var(--border); border-radius: .55rem; }
+.entries { margin: 0; padding: 0; list-style: none; }
+.entry-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--border); }
+.entry-row:last-child { border-bottom: 0; }
+.entry-open {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    min-width: 0;
+    min-height: 3.25rem;
+    padding: .55rem .8rem;
+    text-align: left;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+.entry-open:not(:disabled):hover, .entry-open:not(:disabled):focus-visible { background: var(--surface-raised); }
+.entry-icon { position: relative; flex: 0 0 1.25rem; width: 1.25rem; height: 1.1rem; color: var(--accent); }
+.entry-icon-directory { margin-top: .2rem; border-radius: .12rem; background: currentColor; }
+.entry-icon-directory::before {
+    content: '';
+    position: absolute;
+    left: .12rem;
+    bottom: .9rem;
+    width: .55rem;
+    height: .28rem;
+    border-radius: .1rem .1rem 0 0;
+    background: currentColor;
+}
+.entry-icon-document, .entry-icon-file { border: .12rem solid currentColor; border-radius: .08rem; background: transparent; }
+.entry-icon-document::after, .entry-icon-file::after {
+    content: '';
+    position: absolute;
+    left: .22rem;
+    right: .22rem;
+    top: .35rem;
+    height: .12rem;
+    background: currentColor;
+    box-shadow: 0 .28rem 0 currentColor;
+}
+.entry-icon-file { color: var(--muted); }
+.entry-text { display: grid; min-width: 0; gap: .15rem; }
+.entry-name, .entry-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-path { color: var(--muted); font-size: .82rem; }
+.item-menu { align-self: center; margin-right: .35rem; }
+.item-menu > summary { border-color: transparent; }
+.empty-state { padding: 3rem 1rem; text-align: center; color: var(--muted); }
+.status { min-height: 1.5rem; margin: .5rem 0 0; }
+.status.error { color: var(--danger); }
+.status.notice { color: var(--muted); }
+
+.reader-panel { max-width: 60rem; margin: 0 auto; }
+.reader-toolbar { position: sticky; top: 0; padding: .4rem 0; background: var(--surface); }
 #toc { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; margin-bottom: 1rem; }
 #toc a { margin-left: calc((var(--level) - 1) * 1rem); }
-#document-content { line-height: 1.55; overflow-wrap: anywhere; }
-#document-content pre { overflow: auto; padding: .75rem; background: #8882; }
+#document-content { line-height: 1.6; overflow-wrap: anywhere; }
+#document-content pre { overflow: auto; padding: .75rem; background: var(--surface-raised); }
 #document-content img { max-width: 100%; }
-#status.error { color: #c62828; }
+
+@media (max-width: 680px) {
+    .app-header { padding-inline: .75rem; }
+    .app-header strong { font-size: .95rem; }
+    .app-header #identity { font-size: .8rem; }
+    main { padding: .65rem; }
+    .repository-panel { grid-template-rows: auto auto auto minmax(14rem, calc(100vh - 18rem)); }
+    .repository-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+    .repository-search { grid-column: 1 / -1; grid-row: 2; }
+    .repository-search button { padding-inline: .55rem; }
+    .repository-picker { min-width: 0; }
+    .entry-open { min-height: 3.5rem; }
+    .entry-name { white-space: normal; overflow-wrap: anywhere; }
+}
